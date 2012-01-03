@@ -25,6 +25,7 @@ Synchronize aperture library given by PATH with flickr.
 =cut
 
 use Modern::Perl;
+use autodie;
 
 use Getopt::Long qw/:config/;
 use Pod::Usage;
@@ -32,8 +33,6 @@ use YAML qw/LoadFile DumpFile Load Dump/;
 use DBI;
 use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
-use Digest::MD5 qw/md5_hex/;
-use autodie;
 use Browser::Open qw/open_browser/;
 use List::AllUtils qw/first/;
 
