@@ -149,17 +149,16 @@ sub simplify_flickr_response {
 
 sub flickr_select {
 	my ($method, $args, $select) = @_;
-	my ($res, $page, $key, @results);
+	my ($resp, $page, $key, @results);
 	$args->{per_page} = 500;
 	do {
 		$args->{page} = ++$page;
-		$res = flickr_api($method, %$args);
-		$key = first {ref($res->{$_}) eq 'ARRAY'} keys %$res;
-		push @results, @{$res->{$key}};
-	} while (@{$res->{$key}} == 500);
-	foreach $res (@results) {
-		say Dump({map {$_ ~~ $select ? ($_ => $res->{$_}) : ()} keys %$res});
-	}
+		$resp = flickr_api($method, %$args);
+		$key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
+		foreach my $row  (@{$resp->{$key}}) {
+			say Dump({map {$_ ~~ $select ? ($_ => $row->{$_}) : ()} keys %$row});
+		}
+	} while (@{$resp->{$key}} == 500);
 }
 
 sub aperture_select {
