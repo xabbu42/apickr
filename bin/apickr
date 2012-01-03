@@ -56,9 +56,6 @@ $config = {%$config, %$opts};
 my $command = shift() || "albums";
 my $path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
 
-
-my $album_filter = "RKAlbum.name IS NOT NULL AND RKAlbum.folderUuid != 'BuiltinSmartAlbums' AND RKAlbum.albumType = 1 AND RKAlbum.albumSubclass = 2 and RKAlbum.isMagic = 0";
-my ($select, $add);
 given ($command) {
 	when ("albums") {
 		aperture_select(
