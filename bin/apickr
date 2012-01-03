@@ -22,6 +22,10 @@ Synchronize aperture library given by PATH with flickr.
 
  --help|-h   brief help message
 
+=head1 AUTHOR
+
+ Nathan Gass <gass@search.ch>
+
 =cut
 
 use Modern::Perl;
