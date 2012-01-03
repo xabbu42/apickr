@@ -1,0 +1,180 @@
+#!/usr/bin/env perl
+
+=head1 NAME
+
+apickr - Synchronize aperture library and flickr account.
+
+=head1 SYNOPSIS
+
+apickr [OPTIONS] COMMAND PATH
+
+Synchronize aperture library given by PATH with flickr.
+
+=head1 COMMANDS
+
+  flickr     sync with flickr
+  albums     list albums
+  images     list images
+
+=head1 OPTIONS
+
+ --help|-h   brief help message
+
+=cut
+
+use Modern::Perl;
+
+use Getopt::Long qw/:config/;
+use Pod::Usage;
+use YAML qw/LoadFile DumpFile Load Dump/;
+use DBI;
+use Flickr::API2;
+use File::Spec::Functions qw/splitpath catdir/;
+use Digest::MD5 qw/md5_hex/;
+use autodie;
+use Browser::Open qw/open_browser/;
+use List::AllUtils qw/first/;
+
+my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
+my $config = {};
+eval {
+	$config = LoadFile(catdir($ENV{HOME}, '.apickrrc'));
+};
+my $opts = {};
+GetOptions(
+	$opts,
+	"help|h",
+	) or pod2usage(-exitval => 2, @podargs);
+pod2usage(@podargs) if $opts->{help};
+$config = {%$config, %$opts};
+
+my $command = shift() || "albums";
+my $path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
+
+
+my $album_filter = "RKAlbum.name IS NOT NULL AND RKAlbum.folderUuid != 'BuiltinSmartAlbums' AND RKAlbum.albumType = 1 AND RKAlbum.albumSubclass = 2 and RKAlbum.isMagic = 0";
+my ($select, $add);
+given ($command) {
+	when ("albums") {
+		aperture_select(
+			"RKFolder.name AS album,COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,COUNT(DISTINCT RKVersion.uuid) AS images", 
+			"GROUP BY RKVersion.projectUuid"
+		);
+	}
+	when ("images") {
+		aperture_select(
+			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber"
+		);
+	}
+	when ("flickr-albums") {
+		flickr_select(
+			'flickr.photosets.getList', 
+			{}, 
+			qr/title|photos|count_views|count_comments/
+		);
+	}
+	when ("flickr-images") {
+		flickr_select(
+			'flickr.people.getPhotos', 
+			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
+			qr/title|date_taken|tags|views/
+		);
+	}
+	default {die "Unknown command $_"}
+};
+
+exit;
+
+sub flickr_auth {
+	my $api = shift;
+	my $auth = {};
+	my $authpath = catdir($ENV{HOME}, '.apickr.auth');
+	if (-e $authpath) {
+		$auth = LoadFile($authpath);
+	}
+	if (!$auth->{token}) {
+		my $frob = flickr_api('flickr.auth.getFrob', api_key => $api->raw->{api_key});
+		my $url = $api->raw->request_auth_url('write', $frob);
+		open_browser($url);
+		say "Please authorize apickr to read and write to your flickr account.";
+		say "Press any key to continue.";
+		local $| = 0;
+		getc;
+		$auth = flickr_api('flickr.auth.getToken', frob => $frob);
+		DumpFile($authpath, $auth);
+	}
+	return $auth;
+}
+
+sub flickr_api {
+	state $api = Flickr::API2->new({key => '04c25240b84f6f5d32e8e43fd4deb249', secret => 'abef06bf4946a4a2'});
+	state $auth = flickr_auth($api);
+	my $method = shift;
+	my $params = {@_};
+	$params->{auth_token} = $auth->{token} 
+		if $auth;
+	my $req = $api->execute_method($method, $params);
+	if ($req->{stat} eq 'ok') {
+		delete $req->{stat};
+		my ($first) = keys %$req;
+		return simplify_flickr_response($req->{$first});
+	}
+}
+
+sub simplify_flickr_response {
+	my $r = shift;
+	given (ref $r) {
+		when ('HASH') {
+			if (exists $r->{_content}) {
+				return $r->{_content};
+			} else {
+				return { map {$_ => simplify_flickr_response($r->{$_})} keys %$r };
+			}
+		}
+		when ('ARRAY') {
+			return [map {simplify_flickr_response($_)} @$r];
+		}
+		default {
+			return $r;
+		}
+	} 
+}
+
+sub flickr_select {
+	my ($method, $args, $select) = @_;
+	my ($res, $page, $key, @results);
+	$args->{per_page} = 500;
+	do {
+		$args->{page} = ++$page;
+		$res = flickr_api($method, %$args);
+		$key = first {ref($res->{$_}) eq 'ARRAY'} keys %$res;
+		push @results, @{$res->{$key}};
+	} while (@{$res->{$key}} == 500);
+	foreach $res (@results) {
+		say Dump({map {$_ ~~ $select ? ($_ => $res->{$_}) : ()} keys %$res});
+	}
+}
+
+sub aperture_select {
+	my ($select, $add) = @_;
+	$add = "" unless $add;
+	my $dbpath = catdir($path, 'Database', 'Library.apdb');
+	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
+	my $sth = $dbh->prepare(
+		"Select $select FROM RKVersion"
+		. " JOIN RKFolder ON RKFolder.uuid = RKVersion.projectUuid"
+		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
+		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 $add"
+		);
+	$sth->execute();
+	while ((my $row = $sth->fetchrow_hashref)) {
+		if ($row->{imagePath}) {
+			my ($d,$dir,$name) = splitpath($row->{imagePath});
+			my $prev = catdir($path, 'Previews', $dir, $row->{uuid}, $row->{name} . ".jpg");
+			$row->{path} = -e $prev ? $prev : catdir($path, 'Masters', $row->{imagePath});
+		}
+		say Dump($row);
+	}
+	$dbh->disconnect;
+}
+
