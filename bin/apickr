@@ -12,9 +12,11 @@ Synchronize aperture library given by PATH with flickr.
 
 =head1 COMMANDS
 
-  flickr     sync with flickr
-  albums     list albums
-  images     list images
+  albums        list albums
+  images        list images
+  flickr        sync with flickr
+  flickr-albums list flickr albums
+  flickr-images list flickr images
 
 =head1 OPTIONS
 
@@ -65,6 +67,8 @@ given ($command) {
 		aperture_select(
 			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber"
 		);
+	}
+	when ("flickr") {
 	}
 	when ("flickr-albums") {
 		flickr_select(
