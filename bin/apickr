@@ -39,6 +39,7 @@ use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
 use List::AllUtils qw/first/;
+use Encode qw/encode_utf8/;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -197,6 +198,7 @@ sub display {
 	my ($gen) = @_;
 	my $val;
 	while ($val = $gen->()) {
+		$val->{$_} = encode_utf8($val->{$_}) foreach keys %$val;
 		say Dump $val;
 	}
 }
