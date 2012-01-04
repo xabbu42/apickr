@@ -58,31 +58,32 @@ my $path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
 
 given ($command) {
 	when ("albums") {
-		aperture_select(
+		display(aperture_select(
 			"RKFolder.name AS album,COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,COUNT(DISTINCT RKVersion.uuid) AS images", 
 			"GROUP BY RKVersion.projectUuid"
-		);
+		));
 	}
 	when ("images") {
-		aperture_select(
+		display(aperture_select(
 			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber"
-		);
+		));
 	}
 	when ("flickr") {
 	}
 	when ("flickr-albums") {
-		flickr_select(
-			'flickr.photosets.getList', 
-			{}, 
-			qr/title|photos|count_views|count_comments/
-		);
+		display(filter_keys(
+			qr/title|photos|count_views|count_comments/,
+			flickr_select('flickr.photosets.getList', {})
+		));
 	}
 	when ("flickr-images") {
-		flickr_select(
-			'flickr.people.getPhotos', 
-			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
-			qr/title|date_taken|tags|views/
-		);
+		display(filter_keys(
+			qr/title|date_taken|tags|views/,
+			flickr_select(
+				'flickr.people.getPhotos', 
+				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
+			)
+		));
 	}
 	default {die "Unknown command $_"}
 };
@@ -146,16 +147,18 @@ sub simplify_flickr_response {
 
 sub flickr_select {
 	my ($method, $args, $select) = @_;
-	my ($resp, $page, $key, @results);
+	my ($resp, $page, $key, $i);
 	$args->{per_page} = 500;
-	do {
-		$args->{page} = ++$page;
-		$resp = flickr_api($method, %$args);
-		$key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
-		foreach my $row  (@{$resp->{$key}}) {
-			say Dump({map {$_ ~~ $select ? ($_ => $row->{$_}) : ()} keys %$row});
+	return sub {
+		if (!$i || $i == @{$resp->{$key}}) {
+			return undef if $key && @{$resp->{$key}} < 500;
+			$args->{page} = ++$page;
+			$resp = flickr_api($method, %$args);
+			$key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
+			$i = 0;
 		}
-	} while (@{$resp->{$key}} == 500);
+		return $resp->{$key}[$i++];
+	}
 }
 
 sub aperture_select {
@@ -170,14 +173,31 @@ sub aperture_select {
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 $add"
 		);
 	$sth->execute();
-	while ((my $row = $sth->fetchrow_hashref)) {
-		if ($row->{imagePath}) {
+	return sub {
+		my $row = $sth->fetchrow_hashref;
+		if ($row && $row->{imagePath}) {
 			my ($d,$dir,$name) = splitpath($row->{imagePath});
 			my $prev = catdir($path, 'Previews', $dir, $row->{uuid}, $row->{name} . ".jpg");
 			$row->{path} = -e $prev ? $prev : catdir($path, 'Masters', $row->{imagePath});
 		}
-		say Dump($row);
+		$dbh->disconnect unless $row;
+		return $row;
 	}
-	$dbh->disconnect;
+}
+
+sub filter_keys {
+	my ($select, $gen) = @_;
+	return sub {
+		my $row = $gen->();
+		return $row ? {map {$_ ~~ $select ? ($_ => $row->{$_}) : ()} keys %$row} : undef;
+	}
+}
+
+sub display {
+	my ($gen) = @_;
+	my $val;
+	while ($val = $gen->()) {
+		say Dump $val;
+	}
 }
 
