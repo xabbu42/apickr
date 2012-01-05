@@ -40,6 +40,8 @@ use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
 use List::AllUtils qw/first/;
 use Encode qw/encode_utf8/;
+use DateTime;
+use DateTime::Format::Strptime;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -66,7 +68,7 @@ given ($command) {
 	}
 	when ("images") {
 		display(aperture_select(
-			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber"
+			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RkVersion.imageDate"
 		));
 	}
 	when ("flickr") {
@@ -79,7 +81,7 @@ given ($command) {
 	}
 	when ("flickr-images") {
 		display(filter_keys(
-			qr/title|date_taken|tags|views/,
+			qr/title|datetaken\b|tags|views/,
 			flickr_select(
 				'flickr.people.getPhotos', 
 				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
@@ -158,7 +160,11 @@ sub flickr_select {
 			$key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
 			$i = 0;
 		}
-		return $resp->{$key}[$i++];
+		my $res = $resp->{$key}[$i++];
+		foreach my $k (keys %$res) {
+			$res->{$k} = datetime($res->{$k}) if $k =~ /date/;
+		}
+		return $res;
 	}
 }
 
@@ -181,9 +187,25 @@ sub aperture_select {
 			my $prev = catdir($path, 'Previews', $dir, $row->{uuid}, $row->{name} . ".jpg");
 			$row->{path} = -e $prev ? $prev : catdir($path, 'Masters', $row->{imagePath});
 		}
+		if ($row && $row->{imageDate}) {
+			$row->{imageDate} = datetime($row->{imageDate});
+		}
 		$dbh->disconnect unless $row;
 		return $row;
 	}
+}
+
+sub datetime {
+	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
+	my ($val, $res) = @_;
+	if ($val =~ /^\d+$/) { # aperture datetime
+		$res = DateTime->from_epoch(epoch => $val, formatter => $formatter);
+		$res->set(year => $res->year + 31);
+	} else {               # flickr datetime
+		$res = $formatter->parse_datetime($val);
+		$res->set_formatter($formatter);
+	}
+	return $res;
 }
 
 sub filter_keys {
@@ -198,7 +220,7 @@ sub display {
 	my ($gen) = @_;
 	my $val;
 	while ($val = $gen->()) {
-		$val->{$_} = encode_utf8($val->{$_}) foreach keys %$val;
+		$val->{$_} = $val->{$_} ? encode_utf8($val->{$_}) : $val->{$_} foreach keys %$val;
 		say Dump $val;
 	}
 }
