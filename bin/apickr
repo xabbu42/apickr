@@ -43,6 +43,7 @@ use List::AllUtils qw/first max min/;
 use Encode qw/encode_utf8/;
 use DateTime;
 use DateTime::Format::Strptime;
+use DateTime::Format::Epoch;
 use Carp qw/confess/;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
@@ -164,7 +165,7 @@ sub flickr_select {
 		}
 		my $res = $resp->{$key}[$i++];
 		foreach my $k (keys %$res) {
-			$res->{$k} = datetime($res->{$k}) if $k =~ /date/;
+			$res->{$k} = datetime_flickr($res->{$k}) if $k =~ /date/ && $k !~ 'granularity';
 		}
 		return $res;
 	}
@@ -190,23 +191,34 @@ sub aperture_select {
 			$row->{path} = -e $prev ? $prev : catdir($path, 'Masters', $row->{imagePath});
 		}
 		if ($row && $row->{imageDate}) {
-			$row->{imageDate} = datetime($row->{imageDate});
+			$row->{imageDate} = datetime_aperture($row->{imageDate});
 		}
 		$dbh->disconnect unless $row;
 		return $row;
 	}
 }
 
-sub datetime {
+sub datetime_aperture {
 	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
-	my ($val, $res) = @_;
-	if ($val =~ /^\d+$/) { # aperture datetime
-		$res = DateTime->from_epoch(epoch => $val, formatter => $formatter);
-		$res->set(year => $res->year + 31);
-	} else {               # flickr datetime
-		$res = $formatter->parse_datetime($val);
-		$res->set_formatter($formatter);
+	state $macepoch  = DateTime::Format::Epoch->new(
+		epoch => DateTime->new(year => 2001, month => 1, day => 1),
+		);
+	my ($val) = @_;
+	my $res = $macepoch->parse_datetime(shift) or die "Could not parse aperture date $val";
+	$res->set_formatter($formatter);
+	return $res;
+}
+
+sub datetime_flickr {
+	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
+	my ($val) = @_;
+	my $res;
+	if ($val =~ /^\d+$/) {
+		$res = DateTime->from_epoch(epoch => $val);
+	} else {
+		($res = $formatter->parse_datetime($val)) or die "Could not parse flickr date $val";
 	}
+	$res->set_formatter($formatter);
 	return $res;
 }
 
