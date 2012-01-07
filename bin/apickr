@@ -20,7 +20,8 @@ Synchronize aperture library given by PATH with flickr.
 
 =head1 OPTIONS
 
- --help|-h   brief help message
+ --help|-h    brief help message
+ --num|-n=NUM only process num items
 
 =head1 AUTHOR
 
@@ -38,10 +39,11 @@ use DBI;
 use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
-use List::AllUtils qw/first/;
+use List::AllUtils qw/first max min/;
 use Encode qw/encode_utf8/;
 use DateTime;
 use DateTime::Format::Strptime;
+use Carp qw/confess/;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -51,7 +53,7 @@ eval {
 my $opts = {};
 GetOptions(
 	$opts,
-	"help|h",
+	"help|h", 'num|n=i',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -151,7 +153,7 @@ sub simplify_flickr_response {
 sub flickr_select {
 	my ($method, $args, $select) = @_;
 	my ($resp, $page, $key, $i);
-	$args->{per_page} = 500;
+	$args->{per_page} = $opts->{num} ? min(500, $opts->{num} * 10) : 500;
 	return sub {
 		if (!$i || $i == @{$resp->{$key}}) {
 			return undef if $key && @{$resp->{$key}} < 500;
@@ -217,11 +219,17 @@ sub filter_keys {
 }
 
 sub display {
+	state $num = 0;
 	my ($gen) = @_;
-	my $val;
-	while ($val = $gen->()) {
-		$val->{$_} = $val->{$_} ? encode_utf8($val->{$_}) : $val->{$_} foreach keys %$val;
-		say Dump $val;
-	}
+	my ($row, $n);
+	say d($row) while ($row = $gen->()) && (!$opts->{num} || $n++ < $opts->{num});
+}
+
+sub d {
+	my ($row) = @_;
+	my $res = {};
+	confess "Can only handles hashes" unless ref($row) eq 'HASH';
+	$res->{$_} = $row->{$_} ? encode_utf8($row->{$_}) : $row->{$_} foreach keys %$row;
+	return Dump $res;
 }
 
