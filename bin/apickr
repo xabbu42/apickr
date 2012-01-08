@@ -247,9 +247,16 @@ sub display {
 
 sub d {
 	my ($row) = @_;
-	my $res = {};
-	confess "Can only handles hashes" unless ref($row) eq 'HASH';
-	$res->{$_} = $row->{$_} ? encode_utf8($row->{$_}) : $row->{$_} foreach keys %$row;
-	return Dump $res;
+	return Dump(encode_rec($row));
+}
+
+sub encode_rec {
+	my ($in) = @_;
+	given (ref $in) {
+		when ('HASH')  { return {map {$_ => encode_rec($in->{$_})} keys %$in} };
+		when ('ARRAY') { return [map {encode_rec($_)} @$in] };
+		when (undef)   { return undef };
+		default        { return encode_utf8($in) }
+	}
 }
 
