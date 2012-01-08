@@ -79,20 +79,20 @@ given ($command) {
 	when ("flickr-albums") {
 		display(filter_keys(
 			qr/title|photos|count_views|count_comments/,
-			flickr_select('flickr.photosets.getList', {})
+			flickr_select('photosets.getList', {})
 		));
 	}
 	when ("flickr-images") {
 		my $sets = {};
-		my $it = filter_keys(qr/\bid|title/, flickr_select('flickr.photosets.getList', {}));
+		my $it = filter_keys(qr/\bid|title/, flickr_select('photosets.getList', {}));
 		while (my $set = $it->()) {
-			my $it2 = flickr_select('flickr.photosets.getPhotos', {photoset_id => $set->{id}});
+			my $it2 = flickr_select('photosets.getPhotos', {photoset_id => $set->{id}});
 			while (my $photo = $it2->()) {
 				push @{$sets->{$photo->{id}}}, $set;
 			}
 		}
 		my $photos = flickr_select(
-			'flickr.people.getPhotos',
+			'people.getPhotos',
 			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
 			);
 		display(filter_keys(
@@ -118,14 +118,14 @@ sub flickr_auth {
 		$auth = LoadFile($authpath);
 	}
 	if (!$auth->{token}) {
-		my $frob = flickr_api('flickr.auth.getFrob', api_key => $api->raw->{api_key});
+		my $frob = flickr_api('auth.getFrob', api_key => $api->raw->{api_key});
 		my $url = $api->raw->request_auth_url('write', $frob);
 		open_browser($url);
 		say "Please authorize apickr to read and write to your flickr account.";
 		say "Press any key to continue.";
 		local $| = 0;
 		getc;
-		$auth = flickr_api('flickr.auth.getToken', frob => $frob);
+		$auth = flickr_api('auth.getToken', frob => $frob);
 		DumpFile($authpath, $auth);
 	}
 	return $auth;
@@ -140,7 +140,7 @@ sub flickr_api {
 		if $auth;
 	my $req;
 	eval {
-		$req = $api->execute_method($method, $params);
+		$req = $api->execute_method('flickr.' . $method, $params);
 	};
 	if ($@ && (!$params->{page} || $params->{page} == 1)) {
 		confess $@
