@@ -124,12 +124,19 @@ sub flickr_api {
 	my $params = {@_};
 	$params->{auth_token} = $auth->{token} 
 		if $auth;
-	my $req = $api->execute_method($method, $params);
-	if ($req->{stat} eq 'ok') {
+	my $req;
+	eval {
+		$req = $api->execute_method($method, $params);
+	};
+	if ($@ && (!$params->{page} || $params->{page} == 1)) {
+		confess $@
+	}
+	if ($req && $req->{stat} eq 'ok') {
 		delete $req->{stat};
 		my ($first) = keys %$req;
 		return simplify_flickr_response($req->{$first});
 	}
+	return undef;
 }
 
 sub simplify_flickr_response {
@@ -160,6 +167,7 @@ sub flickr_select {
 			return undef if $key && @{$resp->{$key}} < 500;
 			$args->{page} = ++$page;
 			$resp = flickr_api($method, %$args);
+			return undef unless $resp;
 			$key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
 			$i = 0;
 		}
