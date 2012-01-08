@@ -269,8 +269,7 @@ sub encode_rec {
 	given (ref $in) {
 		when ('HASH')  { return {map {$_ => encode_rec($in->{$_})} keys %$in} };
 		when ('ARRAY') { return [map {encode_rec($_)} @$in] };
-		when (undef)   { return undef };
-		default        { return encode_utf8($in) }
+		default        { return $in ? encode_utf8($in) : $in }
 	}
 }
 
