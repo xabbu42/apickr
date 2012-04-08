@@ -20,8 +20,9 @@ Synchronize aperture library given by PATH with flickr.
 
 =head1 OPTIONS
 
- --help|-h    brief help message
- --num|-n=NUM only process num items
+ --help|-h      brief help message
+ --num|-n=NUM   only process NUM items
+ --album|-a=STR only process Albums which contain STR
 
 =head1 AUTHOR
 
@@ -54,7 +55,7 @@ eval {
 my $opts = {};
 GetOptions(
 	$opts,
-	"help|h", 'num|n=i',
+	'help|h', 'num|n=i', 'album|a=s',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -77,30 +78,39 @@ given ($command) {
 	when ("flickr") {
 	}
 	when ("flickr-albums") {
-		display(filter_keys(
-			qr/title|photos|count_views|count_comments/,
-			flickr_select('photosets.getList', {})
-		));
+		display(
+			select_album( $opts->{album},
+				filter_keys( qr/title|photos|count_views|count_comments/,
+					flickr_select('photosets.getList', {})
+				)
+			)
+		);
 	}
 	when ("flickr-images") {
 		my $sets = {};
-		my $it = filter_keys(qr/\bid|title/, flickr_select('photosets.getList', {}));
+		my $it = select_album($opts->{album}, filter_keys(qr/\bid|title/, flickr_select('photosets.getList', {})));
 		while (my $set = $it->()) {
-			my $it2 = flickr_select('photosets.getPhotos', {photoset_id => $set->{id}});
+			my $it2 = flickr_select(
+				'photosets.getPhotos',
+				{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view'}
+				);
 			while (my $photo = $it2->()) {
 				push @{$sets->{$photo->{id}}}, $set;
 			}
 		}
 		my $photos = flickr_select(
-			'people.getPhotos',
+			'photos.search',
 			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
 			);
 		display(filter_keys(
 			qr/title|album|datetaken\b|tags|views|sets/,
 			sub {
-				my $res = $photos->();
-				return undef unless $res;
-				$res->{sets} = $sets->{$res->{id}};
+				my $res;
+				do {
+					$res = $photos->();
+					return undef unless $res;
+					$res->{sets} = $sets->{$res->{id}};
+				} until !$opts->{album} || $res->{sets};
 				return $res;
 			}
 		));
@@ -183,6 +193,7 @@ sub flickr_select {
 			$resp = flickr_api($method, %$args);
 			return undef unless $resp;
 			$key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
+			return undef unless $key && @{$resp->{$key}};
 			$i = 0;
 		}
 		my $res = $resp->{$key}[$i++];
@@ -202,9 +213,13 @@ sub aperture_select {
 		"Select $select FROM RKVersion"
 		. " JOIN RKFolder ON RKFolder.uuid = RKVersion.projectUuid"
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
-		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 $add"
+		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
+		. ($opts->{album} ? "AND RKFolder.name LIKE ? " : '')
+		. $add
 		);
+	$sth->bind_param(1, '%' . $opts->{album} . '%') if $opts->{album};
 	$sth->execute();
+
 	return sub {
 		my $row = $sth->fetchrow_hashref;
 		if ($row && $row->{imagePath}) {
@@ -249,6 +264,17 @@ sub filter_keys {
 	return sub {
 		my $row = $gen->();
 		return $row ? {map {$_ ~~ $select ? ($_ => $row->{$_}) : ()} keys %$row} : undef;
+	}
+}
+
+sub select_album {
+	my ($album, $gen) = @_;
+	return sub {
+		my $row;
+		while ($row = $gen->()) {
+			return $row if (!$album || $row->{title} =~ /\Q$album\E/i);
+		}
+		return undef;
 	}
 }
 
