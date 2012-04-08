@@ -78,33 +78,24 @@ given ($command) {
 	when ("flickr") {
 	}
 	when ("flickr-albums") {
-		display(
-			select_album( $opts->{album},
-				filter_keys( qr/title|photos|count_views|count_comments/,
-					flickr_select('photosets.getList', {})
-				)
-			)
-		);
+		display(flickr_albums());
 	}
 	when ("flickr-images") {
 		my $sets = {};
-		my $it = select_album($opts->{album}, filter_keys(qr/\bid|title/, flickr_select('photosets.getList', {})));
+		my $it = flickr_albums();
 		while (my $set = $it->()) {
-			my $it2 = flickr_select(
-				'photosets.getPhotos',
-				{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view'}
+			display(
+				filter_keys(
+					qr/title|album|datetaken\b|tags|views|sets/,
+					add_keys(
+						{album => $set->{title}},
+						flickr_select(
+							'photosets.getPhotos',
+							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view'}
+						)
+					)
+				)
 			);
-			display(filter_keys(
-				qr/title|album|datetaken\b|tags|views|sets/,
-				sub {
-					my $row;
-					while (($row = $it2->())) {
-						$row->{album} = $set->{title};
-						return $row;
-					}
-					return undef;
-				}
-			));
 		}
 	}
 	default {die "Unknown command $_"}
@@ -259,6 +250,18 @@ sub filter_keys {
 	}
 }
 
+sub add_keys {
+	my ($keys, $gen) = @_;
+	return sub {
+		my $row;
+		while (($row = $gen->())) {
+			$row->{$_} = $keys->{$_} foreach keys %$keys;
+			return $row;
+		}
+		return undef;
+	}
+}
+
 sub select_album {
 	my ($album, $gen) = @_;
 	return sub {
@@ -268,6 +271,16 @@ sub select_album {
 		}
 		return undef;
 	}
+}
+
+sub flickr_albums {
+	return select_album(
+		$opts->{album},
+		filter_keys(
+			qr/id|title|photos|count_views|count_comments/,
+			flickr_select('photosets.getList', {})
+		),
+	);
 }
 
 sub display {
