@@ -23,6 +23,7 @@ Synchronize aperture library given by PATH with flickr.
  --help|-h      brief help message
  --num|-n=NUM   only process NUM items
  --album|-a=STR only process Albums which contain STR
+ --verbose|-v   output verbose information
 
 =head1 AUTHOR
 
@@ -55,7 +56,7 @@ eval {
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num|n=i', 'album|a=s',
+	'help|h', 'num|n=i', 'album|a=s', 'verbose|v',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -244,6 +245,7 @@ sub datetime_flickr {
 
 sub filter_keys {
 	my ($select, $gen) = @_;
+	return $gen if ($opts->{verbose});
 	return sub {
 		my $row = $gen->();
 		return $row ? {map {$_ ~~ $select ? ($_ => $row->{$_}) : ()} keys %$row} : undef;
