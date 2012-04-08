@@ -93,27 +93,19 @@ given ($command) {
 			my $it2 = flickr_select(
 				'photosets.getPhotos',
 				{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view'}
-				);
-			while (my $photo = $it2->()) {
-				push @{$sets->{$photo->{id}}}, $set;
-			}
-		}
-		my $photos = flickr_select(
-			'photos.search',
-			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
 			);
-		display(filter_keys(
-			qr/title|album|datetaken\b|tags|views|sets/,
-			sub {
-				my $res;
-				do {
-					$res = $photos->();
-					return undef unless $res;
-					$res->{sets} = $sets->{$res->{id}};
-				} until !$opts->{album} || $res->{sets};
-				return $res;
-			}
-		));
+			display(filter_keys(
+				qr/title|album|datetaken\b|tags|views|sets/,
+				sub {
+					my $row;
+					while (($row = $it2->())) {
+						$row->{album} = $set->{title};
+						return $row;
+					}
+					return undef;
+				}
+			));
+		}
 	}
 	default {die "Unknown command $_"}
 };
