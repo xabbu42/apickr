@@ -79,7 +79,12 @@ given ($command) {
 	when ("flickr") {
 	}
 	when ("flickr-albums") {
-		display(flickr_albums());
+		display(
+			filter_keys(
+				qr/id|title|photos|count_views|count_comments/,
+				flickr_albums()
+			),
+		);
 	}
 	when ("flickr-images") {
 		display(
@@ -252,25 +257,16 @@ sub add_keys {
 	}
 }
 
-sub select_album {
-	my ($album, $gen) = @_;
+sub flickr_albums {
+	my $album = $opts->{album};
+	my $all = flickr_select('photosets.getList', {});
 	return sub {
 		my $row;
-		while ($row = $gen->()) {
+		while ($row = $all->()) {
 			return $row if (!$album || $row->{title} =~ /\Q$album\E/i);
 		}
 		return undef;
 	}
-}
-
-sub flickr_albums {
-	return select_album(
-		$opts->{album},
-		filter_keys(
-			qr/id|title|photos|count_views|count_comments/,
-			flickr_select('photosets.getList', {})
-		),
-	);
 }
 
 sub flickr_images {
