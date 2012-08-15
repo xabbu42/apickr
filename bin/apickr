@@ -255,12 +255,10 @@ sub filter_keys {
 sub add_keys {
 	my ($keys, $gen) = @_;
 	return sub {
-		my $row;
-		while (($row = $gen->())) {
-			$row->{$_} = $keys->{$_} foreach keys %$keys;
-			return $row;
-		}
-		return undef;
+		my $row = $gen->();
+		return undef unless $row;
+		$row->{$_} = $keys->{$_} foreach keys %$keys;
+		return $row;
 	}
 }
 
