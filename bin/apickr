@@ -82,22 +82,12 @@ given ($command) {
 		display(flickr_albums());
 	}
 	when ("flickr-images") {
-		my $sets = {};
-		my $it = flickr_albums();
-		while (my $set = $it->()) {
-			display(
-				filter_keys(
-					qr/title|album|datetaken\b|tags|views|sets/,
-					add_keys(
-						{album => $set->{title}},
-						flickr_select(
-							'photosets.getPhotos',
-							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view'}
-						)
-					)
-				)
-			);
-		}
+		display(
+			filter_keys(
+				qr/title|album|datetaken\b|tags|views|sets/,
+				flickr_images()
+			)
+		)
 	}
 	default {die "Unknown command $_"}
 };
@@ -281,6 +271,35 @@ sub flickr_albums {
 			flickr_select('photosets.getList', {})
 		),
 	);
+}
+
+sub flickr_images {
+	if ($opts->{album}) {
+		my $sets = flickr_albums();
+		my ($photos, $set);
+		return sub {
+			while(1) {
+				return undef unless $set || ($set = $sets->());
+				if (!$photos) {
+					$photos = add_keys(
+						{album => $set->{title}},
+						flickr_select(
+							'photosets.getPhotos',
+							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view'}
+						)
+						);
+				}
+				my $photo = $photos->();
+				return $photo if $photo;
+				$set = undef;
+			}
+		}
+	} else {
+		return flickr_select(
+			'people.getPhotos',
+			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
+		);
+	}
 }
 
 sub display {
