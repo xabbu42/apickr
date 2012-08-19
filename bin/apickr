@@ -15,6 +15,7 @@ Synchronize aperture library given by PATH with flickr.
   albums        list albums
   images        list images
   flickr        sync with flickr
+  flickr-fix    fix flickr dates from exif
   flickr-albums list flickr albums
   flickr-images list flickr images
 
@@ -24,6 +25,7 @@ Synchronize aperture library given by PATH with flickr.
  --num|-n=NUM   only process NUM items
  --album|-a=STR only process Albums which contain STR
  --verbose|-v   output verbose information
+ --dry-run      only output changes to flickr data
 
 =head1 AUTHOR
 
@@ -56,7 +58,7 @@ eval {
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num|n=i', 'album|a=s', 'verbose|v',
+	'help|h', 'num|n=i', 'album|a=s', 'verbose|v', 'dry-run',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -77,6 +79,30 @@ given ($command) {
 		));
 	}
 	when ("flickr") {
+	}
+	when ("flickr-fix") {
+		my $ickr = flickr_add_exif(flickr_images());
+		my $photo;
+		while ($photo = $ickr->()) {
+			my %update;
+			my $exif = datetime_exif($photo->{exif}{DateTimeOriginal}{raw});
+			if (abs(($exif - $photo->{datetaken})->in_units('seconds')) > 1) {
+				$update{date_taken} = "" . $exif;
+			}
+			if ($update{date_taken} && $photo->{dateupload} != $exif
+				|| $photo->{dateupload} != $photo->{datetaken}) {
+				$update{date_posted} = $update{date_taken} ? $exif->epoch : $photo->{datetaken}->epoch;
+			}
+			if (%update) {
+				say $photo->{album} . ":\t" . $photo->{title} . "\t" . join(",", keys %update)
+					if $opts->{verbose};
+				flickr_api(
+					'photos.setDates',
+					photo_id => $photo->{id},
+					%update,
+				);
+			}
+		}
 	}
 	when ("flickr-albums") {
 		display(
@@ -125,21 +151,28 @@ sub flickr_api {
 	state $auth = flickr_auth($api);
 	my $method = shift;
 	my $params = {@_};
-	$params->{auth_token} = $auth->{token} 
+	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	eval {
-		$req = $api->execute_method('flickr.' . $method, $params);
-	};
-	if ($@ && (!$params->{page} || $params->{page} == 1)) {
-		confess $@
+	if ($opts->{'dry-run'} && $method =~ /\.set/) {
+		print 'flickr.' . $method, "\n", Dump($params), "\n";
+		return undef;
+	} else {
+		eval {
+			$req = $api->execute_method('flickr.' . $method, $params);
+		};
+		if ($@ && (!$params->{page} || $params->{page} == 1)) {
+			confess $@
+		}
+		if ($req && $req->{stat} eq 'ok') {
+			delete $req->{stat};
+			if (%$req) {
+				my ($first) = keys %$req;
+				return simplify_flickr_response($req->{$first});
+			}
+		}
+		return undef;
 	}
-	if ($req && $req->{stat} eq 'ok') {
-		delete $req->{stat};
-		my ($first) = keys %$req;
-		return simplify_flickr_response($req->{$first});
-	}
-	return undef;
 }
 
 sub simplify_flickr_response {
@@ -225,6 +258,15 @@ sub datetime_aperture {
 	return $res;
 }
 
+sub datetime_exif {
+	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
+	state $parser = DateTime::Format::Strptime->new(pattern => '%Y:%m:%d %H:%M:%S');
+	my ($val) = @_;
+	my $res = $parser->parse_datetime($val) or die "Could not parse exif date $val";
+	$res->set_formatter($formatter);
+	return $res;
+}
+
 sub datetime_flickr {
 	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
 	my ($val) = @_;
@@ -295,6 +337,20 @@ sub flickr_images {
 			'people.getPhotos',
 			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
 		);
+	}
+}
+
+sub flickr_add_exif {
+	my ($gen) = @_;
+	return sub {
+		my $photo = $gen->();
+		return undef unless $photo;
+		my $exif = flickr_api('photos.getExif', photo_id => $photo->{id});
+		$photo->{exif}{camera} = $exif->{camera};
+		foreach my $tag (@{$exif->{exif}}) {
+			$photo->{exif}{$tag->{tag}} = $tag;
+		}
+		return $photo;
 	}
 }
 
