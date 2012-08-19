@@ -44,11 +44,13 @@ use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
 use List::AllUtils qw/first max min/;
-use Encode qw/encode_utf8/;
+use Encode qw/encode_utf8 decode_utf8 encode decode/;
+use Encode::Locale;
 use DateTime;
 use DateTime::Format::Strptime;
 use DateTime::Format::Epoch;
 use Carp qw/confess/;
+use String::ProgressBar;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -83,6 +85,8 @@ given ($command) {
 	when ("flickr-fix") {
 		my $ickr = flickr_add_exif(flickr_images());
 		my $photo;
+		my $bar;
+		$| = 1;
 		while ($photo = $ickr->()) {
 			my %update;
 			my $exif = datetime_exif($photo->{exif}{DateTimeOriginal}{raw});
@@ -93,9 +97,12 @@ given ($command) {
 				|| $photo->{dateupload} != $photo->{datetaken}) {
 				$update{date_posted} = $update{date_taken} ? $exif->epoch : $photo->{datetaken}->epoch;
 			}
+			$bar = String::ProgressBar->new(max => $photo->{total}, length => 40) unless $bar;
+			$bar->text(encode(locale => $photo->{album}) . ":\t") if $opts->{album};
+			$bar->update($photo->{num});
+			$bar->info(encode(locale => $photo->{title} . ($opts->{verbose} ? join(",", keys %update) : '')));
+			$bar->write;
 			if (%update) {
-				say $photo->{album} . ":\t" . $photo->{title} . "\t" . join(",", keys %update)
-					if $opts->{verbose};
 				flickr_api(
 					'photos.setDates',
 					photo_id => $photo->{id},
@@ -103,6 +110,7 @@ given ($command) {
 				);
 			}
 		}
+		print "\n";
 	}
 	when ("flickr-albums") {
 		display(
@@ -180,7 +188,7 @@ sub simplify_flickr_response {
 	given (ref $r) {
 		when ('HASH') {
 			if (exists $r->{_content}) {
-				return $r->{_content};
+				return decode_utf8($r->{_content});
 			} else {
 				return { map {$_ => simplify_flickr_response($r->{$_})} keys %$r };
 			}
@@ -189,14 +197,15 @@ sub simplify_flickr_response {
 			return [map {simplify_flickr_response($_)} @$r];
 		}
 		default {
-			return $r;
+			return decode_utf8($r);
 		}
-	} 
+	}
 }
 
 sub flickr_select {
 	my ($method, $args, $select) = @_;
 	my ($resp, $page, $key, $i);
+	my $num = 1;
 	$args->{per_page} = $opts->{num} ? min(500, $opts->{num} * 10) : 500;
 	return sub {
 		if (!$i || $i == @{$resp->{$key}}) {
@@ -212,6 +221,8 @@ sub flickr_select {
 		foreach my $k (keys %$res) {
 			$res->{$k} = datetime_flickr($res->{$k}) if $k =~ /date/ && $k !~ 'granularity';
 		}
+		$res->{total} = $resp->{total};
+		$res->{num} = $num++;
 		return $res;
 	}
 }
@@ -371,7 +382,7 @@ sub encode_rec {
 	given (ref $in) {
 		when ('HASH')  { return {map {$_ => encode_rec($in->{$_})} keys %$in} };
 		when ('ARRAY') { return [map {encode_rec($_)} @$in] };
-		default        { return $in ? encode_utf8($in) : $in }
+		default        { return $in ? encode(locale => $in) : $in }
 	}
 }
 
