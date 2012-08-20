@@ -12,12 +12,14 @@ Synchronize aperture library given by PATH with flickr.
 
 =head1 COMMANDS
 
-  albums        list albums
-  images        list images
-  flickr        sync with flickr
-  flickr-fix    fix flickr dates from exif
-  flickr-albums list flickr albums
-  flickr-images list flickr images
+  albums              list albums
+  images              list images
+  flickr              sync with flickr
+  flickr-fix          fix flickr dates from exif
+  flickr-albums       list flickr albums
+  flickr-images       list flickr images in a format suitable for flickr-set
+  flickr-backup PATH  backup metadata for selected images to PATH
+  flickr-restore PATH restore metadata for selected images from PATH
 
 =head1 OPTIONS
 
@@ -51,6 +53,7 @@ use DateTime::Format::Strptime;
 use DateTime::Format::Epoch;
 use Carp qw/confess/;
 use String::ProgressBar;
+use File::Slurp;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -66,12 +69,15 @@ pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
 
 my $command = shift() || "albums";
-my $path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
+my $path;
+if (!$command =~ /^flickr-/) {
+	$path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
+}
 
 given ($command) {
 	when ("albums") {
 		display(aperture_select(
-			"RKFolder.name AS album,COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,COUNT(DISTINCT RKVersion.uuid) AS images", 
+			"RKFolder.name AS album,COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,COUNT(DISTINCT RKVersion.uuid) AS images",
 			"GROUP BY RKVersion.projectUuid"
 		));
 	}
@@ -82,11 +88,63 @@ given ($command) {
 	}
 	when ("flickr") {
 	}
+	when ("flickr-backup") {
+		my $path = shift() or die "No path for backup file given!\n";
+		open my $file, ">", $path;
+		$file->print(encode_utf8(Dump($opts)));
+		my $photos = with_progressbar(flickr_images(extras => ''));
+		while (my $photo = $photos->()) {
+			my $info = flickr_api('photos.getInfo', photo_id => $photo->{id});
+			$file->print(encode_utf8(Dump({%$photo, %$info})));
+		}
+		$file->close();
+	}
+	when ("flickr-restore") {
+		my %byid;
+		my $path = shift() or die "No path for backup file given!\n";
+		my @recs = split(/---/, read_file($path));
+		shift @recs;
+		$opts = {%$opts, %{Load(shift @recs)}};
+		foreach my $rec (@recs) {
+			my $new = Load($rec);
+			$byid{$new->{id}} = $new;
+		}
+		my %rawtags;
+		my $result = flickr_api('tags.getListUserRaw');
+		foreach my $tag (@{$result->{tags}}) {
+			my $raw = $tag->{raw}[0];
+			$rawtags{$tag->{clean}} = $raw =~ /\s/ ? "\"$raw\"" : $raw;
+		}
+		my $photos = with_progressbar(flickr_images());
+		while (my $photo = $photos->()) {
+			if (my $old = $byid{$photo->{id}}) {
+				my $info = flickr_api('photos.getInfo', photo_id => $photo->{id});
+				if ($old->{title} ne $info->{title} || $old->{description} ne $info->{description}) {
+					flickr_api('photos.setMeta', photo_id => $photo->{id}, title => $old->{title}, description => $old->{description});
+				}
+				if (join(" ", @{$old->{tags}}) ne join(" ", @{$info->{tags}})) {
+					my $tagstring = join(" ", map {$rawtags{$_} || $_} @{$old->{tags}});
+					flickr_api('photos.setTags', photo_id => $photo->{id}, tags => $tagstring);
+				}
+				my $update;
+				foreach my $key (qw/isfamily isfriend ispublic/) {
+					$update = 1 if ($old->{visibility}{$key} ne $info->{visibility}{$key});
+				}
+				foreach my $key (qw/permaddmeta permcomment/) {
+					$update = 1 if ($old->{permissions}{$key} ne $info->{permissions}{$key});
+				}
+				if ($update) {
+					flickr_api('photos.setPerms', photo_id => $photo->{id}, is_public => $old->{visibility}{ispublic}, is_friend => $old->{visibility}{isfriend}, is_family => $old->{visibility}{isfamily}, perm_comment => $old->{permissions}{permcomment}, perm_addmeta => $old->{permissions}{permaddmeta});
+				}
+				if ($old->{safety_level} != $info->{safety_level}) {
+					flickr_api('photos.setSafetyLevel', photo_id => $photo->{id}, safety_level => $old->{safety_level} + 1);
+				}
+			}
+		}
+	}
 	when ("flickr-fix") {
-		my $ickr = flickr_add_exif(flickr_images());
+		my $ickr = with_progressbar(flickr_add_exif(flickr_images()));
 		my $photo;
-		my $bar;
-		$| = 1;
 		while ($photo = $ickr->()) {
 			my %update;
 			my $exif = datetime_exif($photo->{exif}{DateTimeOriginal}{raw});
@@ -97,11 +155,6 @@ given ($command) {
 				|| $photo->{dateupload} != $photo->{datetaken}) {
 				$update{date_posted} = $update{date_taken} ? $exif->epoch : $photo->{datetaken}->epoch;
 			}
-			$bar = String::ProgressBar->new(max => $photo->{total}, length => 40) unless $bar;
-			$bar->text(encode(locale => $photo->{album}) . ":\t") if $opts->{album};
-			$bar->update($photo->{num});
-			$bar->info(encode(locale => $photo->{title} . ($opts->{verbose} ? join(",", keys %update) : '')));
-			$bar->write;
 			if (%update) {
 				flickr_api(
 					'photos.setDates',
@@ -110,7 +163,6 @@ given ($command) {
 				);
 			}
 		}
-		print "\n";
 	}
 	when ("flickr-albums") {
 		display(
@@ -184,13 +236,16 @@ sub flickr_api {
 }
 
 sub simplify_flickr_response {
-	my $r = shift;
+	my ($r, $inkey) = @_;
+	my $singular = $1 if $inkey && $inkey =~ /^(\w+)s$/;
 	given (ref $r) {
 		when ('HASH') {
 			if (exists $r->{_content}) {
 				return decode_utf8($r->{_content});
+			} elsif ($singular && keys %{$r} == 1 && defined($r->{$singular})) {
+				return simplify_flickr_response($r->{$singular});
 			} else {
-				return { map {$_ => simplify_flickr_response($r->{$_})} keys %$r };
+				return { map {$_ => simplify_flickr_response($r->{$_}, $_)} keys %$r };
 			}
 		}
 		when ('ARRAY') {
@@ -322,6 +377,27 @@ sub flickr_albums {
 	}
 }
 
+sub with_progressbar {
+	my ($gen) = @_;
+	my $bar;
+	$| = 1;
+	return sub {
+		my $val = $gen->();
+		unless (defined $val) {
+			print "\n";
+			return undef;
+		}
+		unless ($bar) {
+			$bar = String::ProgressBar->new(max => $val->{total}, length => 40);
+		}
+		$bar->text(encode(locale => $val->{album}) . ":\t") if $opts->{album} && $val->{album};
+		$bar->update($val->{num});
+		$bar->info(encode(locale => $val->{title})) if $val->{title};
+		$bar->write;
+		return $val;
+	}
+}
+
 sub flickr_images {
 	if ($opts->{album}) {
 		my $sets = flickr_albums();
@@ -334,7 +410,7 @@ sub flickr_images {
 						{album => $set->{title}},
 						flickr_select(
 							'photosets.getPhotos',
-							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view'}
+							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @_}
 						)
 						);
 				}
@@ -346,7 +422,7 @@ sub flickr_images {
 	} else {
 		return flickr_select(
 			'people.getPhotos',
-			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views'},
+			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @_},
 		);
 	}
 }
