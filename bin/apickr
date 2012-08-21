@@ -399,6 +399,7 @@ sub with_progressbar {
 }
 
 sub flickr_images {
+	my @args = @_;
 	if ($opts->{album}) {
 		my $sets = flickr_albums();
 		my ($photos, $set);
@@ -410,7 +411,7 @@ sub flickr_images {
 						{album => $set->{title}},
 						flickr_select(
 							'photosets.getPhotos',
-							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @_}
+							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @args}
 						)
 						);
 				}
@@ -422,7 +423,7 @@ sub flickr_images {
 	} else {
 		return flickr_select(
 			'people.getPhotos',
-			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @_},
+			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @args},
 		);
 	}
 }
