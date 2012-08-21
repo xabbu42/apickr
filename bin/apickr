@@ -90,6 +90,7 @@ given ($command) {
 	}
 	when ("flickr-backup") {
 		my $path = shift() or die "No path for backup file given!\n";
+		die "Will not overwrite existing file $path!\n" if -e $path;
 		open my $file, ">", $path;
 		$file->print(encode_utf8(Dump($opts)));
 		my $photos = with_progressbar(flickr_images(extras => ''));
