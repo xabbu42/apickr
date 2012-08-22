@@ -122,11 +122,11 @@ given ($command) {
 			if (my $old = $byid{$photo->{id}}) {
 				my $new = flickr_backup($photo);
 				if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
-					flickr_api('photos.setMeta', photo_id => $photo->{id}, title => $old->{title}, description => $old->{description});
+					flickr_photos('setMeta', $photo, title => $old->{title}, description => $old->{description});
 				}
 				if (join(" ", @{$old->{tags}}) ne join(" ", @{$new->{tags}})) {
 					my $tagstring = join(" ", map {$rawtags{$_} || $_} @{$old->{tags}});
-					flickr_api('photos.setTags', photo_id => $photo->{id}, tags => $tagstring);
+					flickr_photos('setTags', $photo, tags => $tagstring);
 				}
 				my $update;
 				foreach my $key (qw/isfamily isfriend ispublic/) {
@@ -136,13 +136,13 @@ given ($command) {
 					$update = 1 if ($old->{permissions}{$key} ne $new->{permissions}{$key});
 				}
 				if ($update) {
-					flickr_api('photos.setPerms', photo_id => $photo->{id}, is_public => $old->{visibility}{ispublic}, is_friend => $old->{visibility}{isfriend}, is_family => $old->{visibility}{isfamily}, perm_comment => $old->{permissions}{permcomment}, perm_addmeta => $old->{permissions}{permaddmeta});
+					flickr_photos('setPerms', $photo, is_public => $old->{visibility}{ispublic}, is_friend => $old->{visibility}{isfriend}, is_family => $old->{visibility}{isfamily}, perm_comment => $old->{permissions}{permcomment}, perm_addmeta => $old->{permissions}{permaddmeta});
 				}
 				if ($old->{safety_level} != $new->{safety_level}) {
-					flickr_api('photos.setSafetyLevel', photo_id => $photo->{id}, safety_level => $old->{safety_level} + 1);
+					flickr_photos('setSafetyLevel', $photo, safety_level => $old->{safety_level} + 1);
 				}
 				if ($old->{license} != $new->{license}) {
-					flickr_api('photos.licenses.setLicense', photo_id => $photo->{id}, license_id => $old->{license});
+					flickr_photos('licenses.setLicense', $photo, license_id => $old->{license});
 				}
 			}
 		}
@@ -160,13 +160,8 @@ given ($command) {
 				|| $photo->{dateupload} != $photo->{datetaken}) {
 				$update{date_posted} = $update{date_taken} ? $exif->epoch : $photo->{datetaken}->epoch;
 			}
-			if (%update) {
-				flickr_api(
-					'photos.setDates',
-					photo_id => $photo->{id},
-					%update,
-				);
-			}
+			flickr_photos('setDates', $photo, %update)
+				if (%update);
 		}
 	}
 	when ("flickr-albums") {
@@ -238,6 +233,11 @@ sub flickr_api {
 		}
 		return undef;
 	}
+}
+
+sub flickr_photos {
+	my ($method, $photo, @args) = @_;
+	return flickr_api('photos.' . $method, photo_id => $photo->{id}, @args);
 }
 
 sub simplify_flickr_response {
@@ -438,7 +438,7 @@ sub flickr_add_exif {
 	return sub {
 		my $photo = $gen->();
 		return undef unless $photo;
-		my $exif = flickr_api('photos.getExif', photo_id => $photo->{id});
+		my $exif = flickr_photos('getExif', $photo);
 		$photo->{exif}{camera} = $exif->{camera};
 		foreach my $tag (@{$exif->{exif}}) {
 			$photo->{exif}{$tag->{tag}} = $tag;
@@ -449,7 +449,7 @@ sub flickr_add_exif {
 
 sub flickr_backup {
 	my ($photo) = @_;
-	my $info = flickr_api('photos.getInfo', photo_id => $photo->{id});
+	my $info = flickr_photos('getInfo', $photo);
 	$photo->{$_} = $info->{$_} foreach keys %$info;
 	return $photo;
 }
