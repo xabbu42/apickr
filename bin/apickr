@@ -95,8 +95,7 @@ given ($command) {
 		$file->print(encode_utf8(Dump($opts)));
 		my $photos = with_progressbar(flickr_images(extras => ''));
 		while (my $photo = $photos->()) {
-			my $info = flickr_api('photos.getInfo', photo_id => $photo->{id});
-			$file->print(encode_utf8(Dump({%$photo, %$info})));
+			$file->print(encode_utf8(flickr_backup($photo)));
 		}
 		$file->close();
 	}
@@ -110,37 +109,39 @@ given ($command) {
 			my $new = Load($rec);
 			$byid{$new->{id}} = $new;
 		}
+
 		my %rawtags;
 		my $result = flickr_api('tags.getListUserRaw');
 		foreach my $tag (@{$result->{tags}}) {
 			my $raw = $tag->{raw}[0];
 			$rawtags{$tag->{clean}} = $raw =~ /\s/ ? "\"$raw\"" : $raw;
 		}
+
 		my $photos = with_progressbar(flickr_images());
 		while (my $photo = $photos->()) {
 			if (my $old = $byid{$photo->{id}}) {
-				my $info = flickr_api('photos.getInfo', photo_id => $photo->{id});
-				if ($old->{title} ne $info->{title} || $old->{description} ne $info->{description}) {
+				my $new = flickr_backup($photo);
+				if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
 					flickr_api('photos.setMeta', photo_id => $photo->{id}, title => $old->{title}, description => $old->{description});
 				}
-				if (join(" ", @{$old->{tags}}) ne join(" ", @{$info->{tags}})) {
+				if (join(" ", @{$old->{tags}}) ne join(" ", @{$new->{tags}})) {
 					my $tagstring = join(" ", map {$rawtags{$_} || $_} @{$old->{tags}});
 					flickr_api('photos.setTags', photo_id => $photo->{id}, tags => $tagstring);
 				}
 				my $update;
 				foreach my $key (qw/isfamily isfriend ispublic/) {
-					$update = 1 if ($old->{visibility}{$key} ne $info->{visibility}{$key});
+					$update = 1 if ($old->{visibility}{$key} ne $new->{visibility}{$key});
 				}
 				foreach my $key (qw/permaddmeta permcomment/) {
-					$update = 1 if ($old->{permissions}{$key} ne $info->{permissions}{$key});
+					$update = 1 if ($old->{permissions}{$key} ne $new->{permissions}{$key});
 				}
 				if ($update) {
 					flickr_api('photos.setPerms', photo_id => $photo->{id}, is_public => $old->{visibility}{ispublic}, is_friend => $old->{visibility}{isfriend}, is_family => $old->{visibility}{isfamily}, perm_comment => $old->{permissions}{permcomment}, perm_addmeta => $old->{permissions}{permaddmeta});
 				}
-				if ($old->{safety_level} != $info->{safety_level}) {
+				if ($old->{safety_level} != $new->{safety_level}) {
 					flickr_api('photos.setSafetyLevel', photo_id => $photo->{id}, safety_level => $old->{safety_level} + 1);
 				}
-				if ($old->{license} != $info->{license}) {
+				if ($old->{license} != $new->{license}) {
 					flickr_api('photos.licenses.setLicense', photo_id => $photo->{id}, license_id => $old->{license});
 				}
 			}
@@ -444,6 +445,13 @@ sub flickr_add_exif {
 		}
 		return $photo;
 	}
+}
+
+sub flickr_backup {
+	my ($photo) = @_;
+	my $info = flickr_api('photos.getInfo', photo_id => $photo->{id});
+	$photo->{$_} = $info->{$_} foreach keys %$info;
+	return $photo;
 }
 
 sub display {
