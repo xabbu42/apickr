@@ -140,6 +140,9 @@ given ($command) {
 				if ($old->{safety_level} != $info->{safety_level}) {
 					flickr_api('photos.setSafetyLevel', photo_id => $photo->{id}, safety_level => $old->{safety_level} + 1);
 				}
+				if ($old->{license} != $info->{license}) {
+					flickr_api('photos.licenses.setLicense', photo_id => $photo->{id}, license_id => $old->{license});
+				}
 			}
 		}
 	}
@@ -216,7 +219,7 @@ sub flickr_api {
 		if $auth;
 	my $req;
 	if ($opts->{'dry-run'} && $method =~ /\.set/) {
-		print 'flickr.' . $method, "\n", Dump($params), "\n";
+		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef;
 	} else {
 		eval {
