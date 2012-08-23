@@ -95,7 +95,7 @@ given ($command) {
 		$file->print(encode_utf8(Dump($opts)));
 		my $photos = with_progressbar(flickr_images(extras => ''));
 		while (my $photo = $photos->()) {
-			$file->print(encode_utf8(flickr_backup($photo)));
+			$file->print(encode_utf8(Dump(flickr_backup($photo))));
 		}
 		$file->close();
 	}
