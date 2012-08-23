@@ -37,6 +37,7 @@ Synchronize aperture library given by PATH with flickr.
 
 use Modern::Perl;
 use autodie;
+use common::sense;
 
 use Getopt::Long qw/:config/;
 use Pod::Usage;
@@ -45,7 +46,7 @@ use DBI;
 use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
-use List::AllUtils qw/first max min/;
+use List::AllUtils qw/first max min any/;
 use Encode qw/encode_utf8 decode_utf8 encode decode/;
 use Encode::Locale;
 use DateTime;
@@ -128,21 +129,31 @@ given ($command) {
 					my $tagstring = join(" ", map {$rawtags{$_} || $_} @{$old->{tags}});
 					flickr_photos('setTags', $photo, tags => $tagstring);
 				}
-				my $update;
-				foreach my $key (qw/isfamily isfriend ispublic/) {
-					$update = 1 if ($old->{visibility}{$key} ne $new->{visibility}{$key});
-				}
-				foreach my $key (qw/permaddmeta permcomment/) {
-					$update = 1 if ($old->{permissions}{$key} ne $new->{permissions}{$key});
-				}
-				if ($update) {
-					flickr_photos('setPerms', $photo, is_public => $old->{visibility}{ispublic}, is_friend => $old->{visibility}{isfriend}, is_family => $old->{visibility}{isfamily}, perm_comment => $old->{permissions}{permcomment}, perm_addmeta => $old->{permissions}{permaddmeta});
+				if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
+					&& any {$old->{visibility}{$::_} ne $new->{visibility}{$::_}} qw/isfamily isfriend ispublic/,
+				) {
+					flickr_photos(
+						'setPerms', $photo,
+						map {'is_' . $_ => $old->{visibility}{'is' . $_}} qw/public friend family/,
+						map {'perm_' . $_ => $old->{permissions}{'perm' . $_}} qw/comment addmeta/,
+					);
 				}
 				if ($old->{safety_level} != $new->{safety_level}) {
 					flickr_photos('setSafetyLevel', $photo, safety_level => $old->{safety_level} + 1);
 				}
 				if ($old->{license} != $new->{license}) {
 					flickr_photos('licenses.setLicense', $photo, license_id => $old->{license});
+				}
+				if ($new->{location} && !$old->{location}) {
+					flickr_photos('geo.removeLocation', $photo);
+				} else {
+					if (any {$old->{location}{$::_} ne $new->{location}{$::_}} qw/longitude latitude context accuracy/) {
+						flickr_photos('geo.setLocation', $photo, lon => $old->{location}{longitude}, lat => $old->{location}{latitude}, context => $old->{location}{context}, accuracy => $old->{location}{accuracy});
+					}
+					my @fields = qw(contact family friend public);
+					if (any {$old->{geoperms}{'is' . $::_} ne $new->{geoperms}{'is' . $::_}} @fields) {
+						flickr_photos('geo.setPerms', $photo, map {'is_' . $_ => $old->{geoperms}{'is' . $_}} @fields);
+					}
 				}
 			}
 		}
@@ -214,7 +225,7 @@ sub flickr_api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if ($opts->{'dry-run'} && $method =~ /\.set/) {
+	if ($opts->{'dry-run'} && $method =~ /\.(set|remove)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef;
 	} else {
