@@ -433,7 +433,7 @@ sub flickr_images {
 				}
 				my $photo = $photos->();
 				return $photo if $photo;
-				$set = undef;
+				$set = undef; $photos = undef;
 			}
 		}
 	} else {
