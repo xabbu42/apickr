@@ -118,21 +118,6 @@ given ($command) {
 				if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
 					flickr_photos('setMeta', $photo, title => $old->{title}, description => $old->{description});
 				}
-				my $oldtags = join(" ", sort map {$_->{_content}} @{$old->{tags}});
-				my $newtags = join(" ", sort map {$_->{_content}} @{$new->{tags}});
-				if ($oldtags ne $newtags) {
-					my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} @{$old->{tags}});
-					flickr_photos('setTags', $photo, tags => $tagstring);
-				}
-				if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
-					&& any {$old->{visibility}{$::_} ne $new->{visibility}{$::_}} qw/isfamily isfriend ispublic/,
-				) {
-					flickr_photos(
-						'setPerms', $photo,
-						map {'is_' . $_ => $old->{visibility}{'is' . $_}} qw/public friend family/,
-						map {'perm_' . $_ => $old->{permissions}{'perm' . $_}} qw/comment addmeta/,
-					);
-				}
 				if ($old->{safety_level} != $new->{safety_level}) {
 					flickr_photos('setSafetyLevel', $photo, safety_level => $old->{safety_level} + 1);
 				}
@@ -149,6 +134,21 @@ given ($command) {
 					if (any {$old->{geoperms}{'is' . $::_} ne $new->{geoperms}{'is' . $::_}} @fields) {
 						flickr_photos('geo.setPerms', $photo, map {'is_' . $_ => $old->{geoperms}{'is' . $_}} @fields);
 					}
+				}
+				my $oldtags = join(" ", sort map {$_->{_content}} @{$old->{tags}});
+				my $newtags = join(" ", sort map {$_->{_content}} @{$new->{tags}});
+				if ($oldtags ne $newtags) {
+					my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} @{$old->{tags}});
+					flickr_photos('setTags', $photo, tags => $tagstring);
+				}
+				if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
+					&& any {$old->{visibility}{$::_} ne $new->{visibility}{$::_}} qw/isfamily isfriend ispublic/,
+				) {
+					flickr_photos(
+						'setPerms', $photo,
+						map {'is_' . $_ => $old->{visibility}{'is' . $_}} qw/public friend family/,
+						map {'perm_' . $_ => $old->{permissions}{'perm' . $_}} qw/comment addmeta/,
+					);
 				}
 			}
 		}
