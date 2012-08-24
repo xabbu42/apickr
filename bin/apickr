@@ -225,25 +225,24 @@ sub flickr_api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if ($opts->{'dry-run'} && $method =~ /\.(set|remove)/) {
+	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
-		return undef;
-	} else {
-		eval {
-			$req = $api->execute_method('flickr.' . $method, $params);
-		};
-		if ($@ && (!$params->{page} || $params->{page} == 1)) {
-			confess $@
-		}
-		if ($req && $req->{stat} eq 'ok') {
-			delete $req->{stat};
-			if (%$req) {
-				my ($first) = keys %$req;
-				return simplify_flickr_response($req->{$first});
-			}
-		}
-		return undef;
+		return undef if $opts->{'dry-run'};
 	}
+	eval {
+		$req = $api->execute_method('flickr.' . $method, $params);
+	};
+	if ($@ && (!$params->{page} || $params->{page} == 1)) {
+		confess $@
+	}
+	if ($req && $req->{stat} eq 'ok') {
+		delete $req->{stat};
+		if (%$req) {
+			my ($first) = keys %$req;
+			return simplify_flickr_response($req->{$first});
+		}
+	}
+	return undef;
 }
 
 sub flickr_photos {
