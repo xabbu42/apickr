@@ -111,13 +111,6 @@ given ($command) {
 			$byid{$new->{id}} = $new;
 		}
 
-		my %rawtags;
-		my $result = flickr_api('tags.getListUserRaw');
-		foreach my $tag (@{$result->{tags}}) {
-			my $raw = $tag->{raw}[0];
-			$rawtags{$tag->{clean}} = $raw =~ /\s/ ? "\"$raw\"" : $raw;
-		}
-
 		my $photos = with_progressbar(flickr_images());
 		while (my $photo = $photos->()) {
 			if (my $old = $byid{$photo->{id}}) {
@@ -125,8 +118,10 @@ given ($command) {
 				if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
 					flickr_photos('setMeta', $photo, title => $old->{title}, description => $old->{description});
 				}
-				if (join(" ", @{$old->{tags}}) ne join(" ", @{$new->{tags}})) {
-					my $tagstring = join(" ", map {$rawtags{$_} || $_} @{$old->{tags}});
+				my $oldtags = join(" ", sort map {$_->{_content}} @{$old->{tags}});
+				my $newtags = join(" ", sort map {$_->{_content}} @{$new->{tags}});
+				if ($oldtags ne $newtags) {
+					my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} @{$old->{tags}});
 					flickr_photos('setTags', $photo, tags => $tagstring);
 				}
 				if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
@@ -255,7 +250,7 @@ sub simplify_flickr_response {
 	my $singular = $1 if $inkey && $inkey =~ /^(\w+)s$/;
 	given (ref $r) {
 		when ('HASH') {
-			if (exists $r->{_content}) {
+			if (exists $r->{_content} && keys %{$r} == 1) {
 				return decode_utf8($r->{_content});
 			} elsif ($singular && keys %{$r} == 1 && defined($r->{$singular})) {
 				return simplify_flickr_response($r->{$singular});
