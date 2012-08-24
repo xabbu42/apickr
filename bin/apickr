@@ -180,6 +180,23 @@ given ($command) {
 				foreach my $m (values $new->{notes}) {
 					flickr_api('photos.notes.delete', note_id => $m->{id});
 				}
+
+				foreach my $p (values $old->{people}{list}) {
+					my $q = $new->{people}{list}{$p->{nsid}};
+					my %coords = map { 'person_' . $_ => $p->{$_} } qw/x y h w/;
+					if (!$q) {
+						flickr_photos('people.add', $photo, 'user_id' => $p->{nsid}, %coords);
+					} elsif (all {!defined $p->{$::_}} qw/x y h w/ and any {defined $q->{$::_}} qw/x y h w/) {
+						flickr_photos('people.deleteCoords', $photo, 'user_id' => $p->{nsid});
+					} elsif (any {$p->{$::_} ne $q->{$::_}} qw/x y h w/) {
+						flickr_photos('people.editCoords', $photo, 'user_id' => $p->{nsid}, %coords);
+					}
+				}
+				foreach my $q (values $new->{people}{list}) {
+					unless ($old->{people}{list}{$q->{nsid}}) {
+						flickr_photos('people.delete', $photo, 'user_id' => $q->{nsid});
+					}
+				}
 			}
 		}
 	}
@@ -280,7 +297,7 @@ sub simplify_flickr_response {
 	my $singular = $1 if $inkey && $inkey =~ /^(\w+)s$/;
 	given (ref $r) {
 		when ('HASH') {
-			if (exists $r->{_content} && keys %{$r} == 1) {
+			if (exists $r->{_content} && keys($r) == 1) {
 				return decode_utf8($r->{_content});
 			} elsif ($singular && keys $r == 1 && defined($r->{$singular})) {
 				return simplify_flickr_response($r->{$singular}, $inarray,);
@@ -289,8 +306,8 @@ sub simplify_flickr_response {
 			}
 		}
 		when ('ARRAY') {
-			if ($inarray && all {ref($::_) eq 'HASH' and $::_->{id}} @$r) {
-				return { map {$_->{id} => simplify_flickr_response($_, $inarray)} @$r };
+			if ($inarray && all {ref($::_) eq 'HASH' and $::_->{id} || $::_->{nsid}} @$r) {
+				return { map {($_->{id} || $_->{nsid}) => simplify_flickr_response($_, $inarray)} @$r };
 			} else {
 				return [map {simplify_flickr_response($_, 1)} @$r];
 			}
@@ -490,6 +507,7 @@ sub flickr_backup {
 	my ($photo) = @_;
 	my $info = flickr_photos('getInfo', $photo);
 	$photo->{$_} = $info->{$_} foreach keys %$info;
+	$photo->{people}{list} = $photo->{people}{haspeople} ? ${flickr_photos('people.getList', $photo)}{person} : {};
 	return $photo;
 }
 
