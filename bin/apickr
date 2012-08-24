@@ -46,7 +46,7 @@ use DBI;
 use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
-use List::AllUtils qw/first max min any/;
+use List::AllUtils qw/first max min any all/;
 use Encode qw/encode_utf8 decode_utf8 encode decode/;
 use Encode::Locale;
 use DateTime;
@@ -58,9 +58,12 @@ use File::Slurp;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
-eval {
-	$config = LoadFile(catdir($ENV{HOME}, '.apickrrc'));
-};
+{
+	local $@;
+	eval {
+		$config = LoadFile(catdir($ENV{HOME}, '.apickrrc'));
+	};
+}
 my $opts = {};
 GetOptions(
 	$opts,
@@ -135,10 +138,8 @@ given ($command) {
 						flickr_photos('geo.setPerms', $photo, map {'is_' . $_ => $old->{geoperms}{'is' . $_}} @fields);
 					}
 				}
-				my $oldtags = join(" ", sort map {$_->{_content}} @{$old->{tags}});
-				my $newtags = join(" ", sort map {$_->{_content}} @{$new->{tags}});
-				if ($oldtags ne $newtags) {
-					my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} @{$old->{tags}});
+				if (join(" ", sort keys $old->{tags}) ne join(" ", sort keys $new->{tags})) {
+					my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} values $old->{tags});
 					flickr_photos('setTags', $photo, tags => $tagstring);
 				}
 				if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
@@ -233,8 +234,8 @@ sub flickr_api {
 	if ($req && $req->{stat} eq 'ok') {
 		delete $req->{stat};
 		if (%$req) {
-			my ($first) = keys %$req;
-			return simplify_flickr_response($req->{$first});
+			my ($first) = keys $req;
+			return simplify_flickr_response($req->{$first}, $params->{page} ? 0 : 1);
 		}
 	}
 	return undef;
@@ -246,20 +247,24 @@ sub flickr_photos {
 }
 
 sub simplify_flickr_response {
-	my ($r, $inkey) = @_;
+	my ($r, $inarray, $inkey) = @_;
 	my $singular = $1 if $inkey && $inkey =~ /^(\w+)s$/;
 	given (ref $r) {
 		when ('HASH') {
 			if (exists $r->{_content} && keys %{$r} == 1) {
 				return decode_utf8($r->{_content});
-			} elsif ($singular && keys %{$r} == 1 && defined($r->{$singular})) {
-				return simplify_flickr_response($r->{$singular});
+			} elsif ($singular && keys $r == 1 && defined($r->{$singular})) {
+				return simplify_flickr_response($r->{$singular}, $inarray,);
 			} else {
-				return { map {$_ => simplify_flickr_response($r->{$_}, $_)} keys %$r };
+				return { map {$_ => simplify_flickr_response($r->{$_}, $inarray, $_)} keys %$r };
 			}
 		}
 		when ('ARRAY') {
-			return [map {simplify_flickr_response($_)} @$r];
+			if ($inarray && all {ref($::_) eq 'HASH' and $::_->{id}} @$r) {
+				return { map {$_->{id} => simplify_flickr_response($_, $inarray)} @$r };
+			} else {
+				return [map {simplify_flickr_response($_, 1)} @$r];
+			}
 		}
 		default {
 			return decode_utf8($r);
