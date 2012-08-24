@@ -46,7 +46,7 @@ use DBI;
 use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
-use List::AllUtils qw/first max min any all/;
+use List::AllUtils qw/first max min any all sum/;
 use Encode qw/encode_utf8 decode_utf8 encode decode/;
 use Encode::Locale;
 use DateTime;
@@ -151,6 +151,35 @@ given ($command) {
 						map {'perm_' . $_ => $old->{permissions}{'perm' . $_}} qw/comment addmeta/,
 					);
 				}
+				my ($score_matrix, $allscores) = ({}, {});
+				my %weight = (id => 100, content => 3, x => 2, y => 2, w => 1, h => 1);
+				foreach my $n (values $old->{notes}) {
+					foreach my $m (values $new->{notes}) {
+						my $score = sum(map {$weight{$_}} grep {$n->{$_} eq $m->{$_}} qw/id x y h w _content/);
+						if ($score > 0) {
+							$score_matrix->{$n->{id}}{$m->{id}} = $score;
+							$allscores->{$score}++;
+						}
+					}
+				}
+				foreach my $score (sort {$b <=> $a} keys $allscores) {
+					foreach my $n (values $old->{notes}) {
+						my $m = first {$score_matrix->{$n->{id}}{$::_->{id}} == $score} values $new->{notes};
+						next unless $m;
+						delete $old->{notes}{$n->{id}};
+						delete $new->{notes}{$m->{id}};
+						next unless any {$n->{$::_} ne $m->{$::_}} qw/_content x y w h/;
+						flickr_photos('notes.edit', $photo, note_id => $m->{id}, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
+					}
+				}
+
+				foreach my $n (values $old->{notes}) {
+					flickr_photos('notes.add', $photo, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
+				}
+
+				foreach my $m (values $new->{notes}) {
+					flickr_api('photos.notes.delete', note_id => $m->{id});
+				}
 			}
 		}
 	}
@@ -221,7 +250,7 @@ sub flickr_api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove)/) {
+	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef if $opts->{'dry-run'};
 	}
