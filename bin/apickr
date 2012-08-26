@@ -205,12 +205,13 @@ given ($command) {
 		my $photo;
 		while ($photo = $ickr->()) {
 			my %update;
-			my $exif = datetime_exif($photo->{exif}{DateTimeOriginal}{raw});
-			if (abs(($exif - $photo->{datetaken})->in_units('seconds')) > 1) {
+			my $exif       = datetime_exif($photo->{exif}{DateTimeOriginal}{raw});
+			my $datetaken  = datetime_flickr($photo->{datetaken});
+			my $dateupload = datetime_flickr($photo->{dateupload});
+			if (abs(($exif - $datetaken)->in_units('seconds')) > 1) {
 				$update{date_taken} = "" . $exif;
 			}
-			if ($update{date_taken} && $photo->{dateupload} != $exif
-				|| $photo->{dateupload} != $photo->{datetaken}) {
+			if ($update{date_taken} && $dateupload != $exif || $dateupload != $datetaken) {
 				$update{date_posted} = $update{date_taken} ? $exif->epoch : $photo->{datetaken}->epoch;
 			}
 			flickr_photos('setDates', $photo, %update)
@@ -334,9 +335,6 @@ sub flickr_select {
 			$i = 0;
 		}
 		my $res = $resp->{$key}[$i++];
-		foreach my $k (keys %$res) {
-			$res->{$k} = datetime_flickr($res->{$k}) if $k =~ /date/ && $k !~ 'granularity';
-		}
 		$res->{total} = $resp->{total};
 		$res->{num} = $num++;
 		return $res;
