@@ -412,13 +412,13 @@ sub _filter_keys_rec {
 		when ('HASH') {
 			foreach my $key (keys $data) {
 				my $val = _filter_keys_rec($prefix . "." . $key, $select, $data->{$key});
-				$result->{$key} = $val if $val;
+				$result->{$key} = $val if defined $val;
 			}
 		}
 		when ('ARRAY') {
 			foreach my $val ($data) {
 				my $new = _filter_keys_rec($prefix, $select, $val);
-				push $result, $new if $new;
+				push $result, $new if defined $new;
 			}
 		}
 		default {
