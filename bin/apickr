@@ -27,6 +27,7 @@ Synchronize aperture library given by PATH with flickr.
  --num|-n=NUM   only process NUM items
  --album|-a=STR only process Aperture Albums/Flickr Photosets which contain STR
  --verbose|-v   output verbose information
+ --select|-s    regex to select *additional* keys to output
  --dry-run      only output changes to flickr data
 
 =head1 AUTHOR
@@ -64,10 +65,10 @@ my $config = {};
 		$config = LoadFile(catdir($ENV{HOME}, '.apickrrc'));
 	};
 }
-my $opts = {};
+my $opts = {select => '\b\B'};
 GetOptions(
 	$opts,
-	'help|h', 'num|n=i', 'album|a=s', 'verbose|v', 'dry-run',
+	'help|h', 'num|n=i', 'album|a=s', 'verbose|v', 'select|s=s', 'dry-run',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -221,7 +222,7 @@ given ($command) {
 	when ("flickr-albums") {
 		display(
 			filter_keys(
-				qr/id|title|photos|count_views|count_comments/,
+				qr/id|title|photos|count_views|count_comments|$opts->{select}/,
 				flickr_photosets()
 			),
 		);
@@ -229,7 +230,7 @@ given ($command) {
 	when ("flickr-images") {
 		display(
 			filter_keys(
-				qr/title|photoset.title|datetaken\b|tags|views|sets/,
+				qr/title|photoset.title|datetaken\b|tags|views|sets|$opts->{select}/,
 				flickr_images()
 			)
 		)
