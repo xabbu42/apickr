@@ -16,7 +16,7 @@ Synchronize aperture library given by PATH with flickr.
   images              list images
   flickr              sync with flickr
   flickr-fix          fix flickr dates from exif
-  flickr-albums       list flickr albums
+  flickr-photosets    list flickr photosets
   flickr-images       list flickr images in a format suitable for flickr-set
   flickr-backup PATH  backup metadata for selected images to PATH
   flickr-restore PATH restore metadata for selected images from PATH
@@ -25,7 +25,7 @@ Synchronize aperture library given by PATH with flickr.
 
  --help|-h      brief help message
  --num|-n=NUM   only process NUM items
- --album|-a=STR only process Albums which contain STR
+ --album|-a=STR only process Aperture Albums/Flickr Photosets which contain STR
  --verbose|-v   output verbose information
  --dry-run      only output changes to flickr data
 
@@ -221,14 +221,14 @@ given ($command) {
 		display(
 			filter_keys(
 				qr/id|title|photos|count_views|count_comments/,
-				flickr_albums()
+				flickr_photosets()
 			),
 		);
 	}
 	when ("flickr-images") {
 		display(
 			filter_keys(
-				qr/title|album|datetaken\b|tags|views|sets/,
+				qr/title|photoset.title|datetaken\b|tags|views|sets/,
 				flickr_images()
 			)
 		)
@@ -407,12 +407,34 @@ sub datetime_flickr {
 	return $res;
 }
 
+sub _filter_keys_rec {
+	my ($prefix, $select, $data) = @_;
+	my $result;
+	given (ref $data) {
+		when ('HASH') {
+			foreach my $key (keys $data) {
+				my $val = _filter_keys_rec($prefix . "." . $key, $select, $data->{$key});
+				$result->{$key} = $val if $val;
+			}
+		}
+		when ('ARRAY') {
+			foreach my $val ($data) {
+				my $new = _filter_keys_rec($prefix, $select, $val);
+				push $result, $new if $new;
+			}
+		}
+		default {
+			$result = $prefix ~~ $select ? $data : undef;
+		}
+	}
+	return $result;
+}
 sub filter_keys {
 	my ($select, $gen) = @_;
 	return $gen if ($opts->{verbose});
 	return sub {
 		my $row = $gen->();
-		return $row ? {map {$_ ~~ $select ? ($_ => $row->{$_}) : ()} keys %$row} : undef;
+		return $row ? _filter_keys_rec('', $select, $row) : undef;
 	}
 }
 
@@ -426,7 +448,7 @@ sub add_keys {
 	}
 }
 
-sub flickr_albums {
+sub flickr_photosets {
 	my $album = $opts->{album};
 	my $all = flickr_select('photosets.getList', {});
 	return sub {
@@ -462,14 +484,14 @@ sub with_progressbar {
 sub flickr_images {
 	my @args = @_;
 	if ($opts->{album}) {
-		my $sets = flickr_albums();
+		my $sets = flickr_photosets();
 		my ($photos, $set);
 		return sub {
 			while(1) {
 				return undef unless $set || ($set = $sets->());
 				if (!$photos) {
 					$photos = add_keys(
-						{album => $set->{title}},
+						{photoset => $set},
 						flickr_select(
 							'photosets.getPhotos',
 							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @args}
