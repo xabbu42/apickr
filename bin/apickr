@@ -75,7 +75,7 @@ $config = {%$config, %$opts};
 
 my $command = shift() || "albums";
 my $path;
-if (!$command =~ /^flickr-/) {
+if ($command !~ /^flickr-/) {
 	$path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
 }
 
