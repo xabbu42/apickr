@@ -219,7 +219,7 @@ given ($command) {
 				if (%update);
 		}
 	}
-	when ("flickr-albums") {
+	when ("flickr-photosets") {
 		display(
 			filter_keys(
 				qr/id|title|photos|count_views|count_comments|$opts->{select}/,
