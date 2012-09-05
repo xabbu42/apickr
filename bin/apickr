@@ -23,12 +23,12 @@ Synchronize aperture library given by PATH with flickr.
 
 =head1 OPTIONS
 
- --help|-h      brief help message
- --num|-n=NUM   only process NUM items
- --album|-a=STR only process Aperture Albums/Flickr Photosets which contain STR
- --verbose|-v   output verbose information
- --select|-s    regex to select *additional* keys to output
- --dry-run      only output changes to flickr data
+ --help|-h         brief help message
+ --num|-n=NUM      only process NUM items
+ --album|-a=REGEX  only process Aperture Albums/Flickr Photosets which match REGEX
+ --verbose|-v      output verbose information
+ --select|-s       regex to select *additional* keys to output
+ --dry-run         only output changes to flickr data
 
 =head1 AUTHOR
 
@@ -352,10 +352,10 @@ sub aperture_select {
 		. " JOIN RKFolder ON RKFolder.uuid = RKVersion.projectUuid"
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
-		. ($opts->{album} ? "AND RKFolder.name LIKE ? " : '')
+		. ($opts->{album} ? "AND RKFolder.name REGEXP ? " : '')
 		. $add
 		);
-	$sth->bind_param(1, '%' . $opts->{album} . '%') if $opts->{album};
+	$sth->bind_param(1, $opts->{album}) if $opts->{album};
 	$sth->execute();
 
 	return sub {
@@ -453,7 +453,7 @@ sub flickr_photosets {
 	return sub {
 		my $row;
 		while ($row = $all->()) {
-			return $row if (!$album || $row->{title} =~ /\Q$album\E/i);
+			return $row if (!$album || $row->{title} =~ /$album/i);
 		}
 		return undef;
 	}
