@@ -521,7 +521,7 @@ sub with_progressbar {
 			$bar = String::ProgressBar->new(
 				max    => $val->{total},
 				length => 40,
-				text   => encode(locale => sprintf("%20.20s", $opts->{album} && $val->{photoset}{title} ? $val->{photoset}{title} . ":\t" : $text . ":\t")),
+				text   => encode(locale => sprintf("%20.20s", $opts->{album} && $val->{photoset}{title} ? $val->{photoset}{title} : $text) . ": "),
 			);
 		}
 		$oldtitle = $val->{photoset}{title};
