@@ -24,7 +24,7 @@ Synchronize aperture library given by PATH with flickr.
 =head1 OPTIONS
 
  --help|-h         brief help message
- --num|-n=NUM      only process NUM items
+ --num=NUM         only process NUM items
  --album|-a=REGEX  only process Aperture Albums/Flickr Photosets which match REGEX
  --verbose|-v      output verbose information
  --select|-s       regex to select *additional* keys to output
@@ -69,7 +69,7 @@ my $config = {};
 my $opts = {select => '\b\B'};
 GetOptions(
 	$opts,
-	'help|h', 'num|n=i', 'album|a=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f',
+	'help|h', 'num=i', 'album|a=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -375,10 +375,10 @@ sub flickr_select {
 	my ($method, $args, $select) = @_;
 	my ($resp, $page, $key, $i);
 	my $num = 1;
-	$args->{per_page} = $opts->{num} ? min(500, $opts->{num} * 10) : 500;
+	$args->{per_page} = $opts->{num} ? min(500, $opts->{num}) : 500;
 	return sub {
 		if (!$i || $i == @{$resp->{$key}}) {
-			return undef if $key && @{$resp->{$key}} < 500;
+			return undef if $key and @{$resp->{$key}} < 500 || $opts->{num};
 			$args->{page} = ++$page;
 			$resp = flickr_api($method, %$args);
 			return undef unless $resp;
@@ -387,7 +387,7 @@ sub flickr_select {
 			$i = 0;
 		}
 		my $res = $resp->{$key}[$i++];
-		$res->{total} = $resp->{total};
+		$res->{total} = $opts->{num} || $resp->{total};
 		$res->{num} = $num++;
 		return $res;
 	}
@@ -606,7 +606,7 @@ sub display {
 	state $num = 0;
 	my ($gen) = @_;
 	my ($row, $n);
-	say d($row) while ($row = $gen->()) && (!$opts->{num} || $n++ < $opts->{num});
+	say d($row) while $row = $gen->();
 }
 
 sub d {
