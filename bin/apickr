@@ -461,7 +461,7 @@ sub flickr_photosets {
 
 sub with_progressbar {
 	my ($gen) = @_;
-	my $bar;
+	my ($bar, $oldtitle);
 	$| = 1;
 	return sub {
 		my $val = $gen->();
@@ -469,10 +469,15 @@ sub with_progressbar {
 			print "\n";
 			return undef;
 		}
-		unless ($bar) {
-			$bar = String::ProgressBar->new(max => $val->{total}, length => 40);
+		if ($oldtitle && $val->{album} ne $oldtitle or !$bar) {
+			print "\n" if $bar;
+			$bar = String::ProgressBar->new(
+				max    => $val->{total},
+				length => 40,
+			);
+			$bar->text(encode(locale => $val->{album}) . ":\t") if $opts->{album} && $val->{album};
 		}
-		$bar->text(encode(locale => $val->{album}) . ":\t") if $opts->{album} && $val->{album};
+		$oldtitle = $val->{album};
 		$bar->update($val->{num});
 		$bar->info(encode(locale => $val->{title})) if $val->{title};
 		$bar->write;
