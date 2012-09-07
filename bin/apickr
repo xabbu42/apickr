@@ -100,7 +100,7 @@ given ($command) {
 		open my $file, ">", $path;
 		$file->print(encode_utf8(Dump($opts)));
 		$file->print(Dump(undef));
-		my $photos = with_progressbar(flickr_images(extras => ''));
+		my $photos = with_progressbar(flickr_images(extras => ''), 'Photos');
 		my (@photosets_list, %photosets_hash);
 		while (my $photo = $photos->()) {
 			my $backup = flickr_photo_backup($photo);
@@ -113,8 +113,11 @@ given ($command) {
 			}
 		}
 		$file->print(Dump(undef));
-		my $photosets = @photosets_list ? sub {$photosets_hash{shift @photosets_list}}
-		                                : flickr_photosets_list();
+		my $photosets = with_progressbar(
+			@photosets_list ? sub {$photosets_hash{shift @photosets_list}}
+			                : flickr_photosets_list(),
+			'Photosets',
+		);
 		while (my $photoset = $photosets->()) {
 			my $backup = flickr_photoset_backup($photoset);
 			$file->print(encode_utf8(Dump($backup)));
@@ -128,7 +131,7 @@ given ($command) {
 		my ($opts_yaml, $photo_backups_yaml, $photoset_backups_yaml) =
 			map {my @res = split "---", $_; shift @res; \@res;} split("--- ~", decode_utf8(read_file($path)));
 		$opts = {%$opts, %{Load($opts_yaml->[0])}};
-		my $photo_backups = with_progressbar(sub { Load(shift $photo_backups_yaml) });
+		my $photo_backups = with_progressbar(sub { Load(shift $photo_backups_yaml) }, 'Photos');
 		my $photoset_backups = with_progressbar(sub {
 			state $i = 0;
 			my $res = Load($photoset_backups_yaml->[$i++]);
