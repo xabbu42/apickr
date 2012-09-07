@@ -105,7 +105,7 @@ given ($command) {
 		while (my $photo = $photos->()) {
 			my $backup = flickr_photo_backup($photo);
 			$file->print(encode_utf8(Dump($backup)));
-			if ($photo->{photoset}) {
+			if (%{$photo->{photoset}}) {
 				my $id = $photo->{photoset}{id};
 				push @photosets_list, $id unless $photosets_hash{$id};
 				$photosets_hash{$id} ||= $photo->{photoset};
