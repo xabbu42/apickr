@@ -28,7 +28,8 @@ Synchronize aperture library given by PATH with flickr.
  --album|-a=REGEX  only process Aperture Albums/Flickr Photosets which match REGEX
  --verbose|-v      output verbose information
  --select|-s       regex to select *additional* keys to output
- --dry-run         only output changes to flickr data
+ --dry-run|-n      only output changes to flickr data
+ --force|-f        overwrite already existing backups with flickr-backup
 
 =head1 AUTHOR
 
@@ -68,7 +69,7 @@ my $config = {};
 my $opts = {select => '\b\B'};
 GetOptions(
 	$opts,
-	'help|h', 'num|n=i', 'album|a=s', 'verbose|v', 'select|s=s', 'dry-run',
+	'help|h', 'num|n=i', 'album|a=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -95,7 +96,7 @@ given ($command) {
 	}
 	when ("flickr-backup") {
 		my $path = shift() or die "No path for backup file given!\n";
-		die "Will not overwrite existing file $path!\n" if -e $path;
+		die "Will not overwrite existing file $path!\n" if -e $path && !$opts->{force};
 		open my $file, ">", $path;
 		$file->print(encode_utf8(Dump($opts)));
 		$file->print(Dump(undef));
