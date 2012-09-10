@@ -259,7 +259,7 @@ given ($command) {
 				$update{date_taken} = "" . $exif;
 			}
 			if ($update{date_taken} && $dateupload != $exif || $dateupload != $datetaken) {
-				$update{date_posted} = $update{date_taken} ? $exif->epoch : $photo->{datetaken}->epoch;
+				$update{date_posted} = $update{date_taken} ? $exif->epoch : $datetaken->epoch;
 			}
 			flickr_photos('setDates', $photo, %update)
 				if (%update);
