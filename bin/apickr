@@ -66,7 +66,7 @@ my $config = {};
 		$config = LoadFile(catdir($ENV{HOME}, '.apickrrc'));
 	};
 }
-my $opts = {select => '\b\B'};
+my $opts = {};
 GetOptions(
 	$opts,
 	'help|h', 'num=i', 'album|a=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f',
@@ -266,17 +266,19 @@ given ($command) {
 		}
 	}
 	when ("flickr-photosets") {
+		my $select = $opts->{select} // '\b\B';
 		display(
 			filter_keys(
-				qr/id|title|photos|count_views|count_comments|$opts->{select}/,
+				qr/id|title|photos|count_views|count_comments|$select/,
 				flickr_photosets_list()
 			),
 		);
 	}
 	when ("flickr-images") {
+		my $select = $opts->{select} // '\b\B';
 		display(
 			filter_keys(
-				qr/title|photoset.title|datetaken\b|tags|views|sets|$opts->{select}/,
+				qr/title|photoset.title|datetaken\b|tags|views|sets|$select/,
 				flickr_images()
 			)
 		)
@@ -396,6 +398,7 @@ sub flickr_select {
 sub aperture_select {
 	my ($select, $add) = @_;
 	$add = "" unless $add;
+	$select .= "," . $opts->{select} if $opts->{select};
 	my $dbpath = catdir($path, 'Database', 'Library.apdb');
 	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
 	my $sth = $dbh->prepare(
