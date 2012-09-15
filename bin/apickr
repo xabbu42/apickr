@@ -17,7 +17,7 @@ Synchronize aperture library given by PATH with flickr.
   flickr              sync with flickr
   flickr-fix          fix flickr dates from exif
   flickr-photosets    list flickr photosets
-  flickr-images       list flickr images in a format suitable for flickr-set
+  flickr-images       list flickr images
   flickr-backup PATH  backup metadata for selected images to PATH
   flickr-restore PATH restore metadata for selected images from PATH
 
