@@ -26,6 +26,7 @@ Synchronize aperture library given by PATH with flickr.
  --help|-h         brief help message
  --num=NUM         only process NUM items
  --album|-a=REGEX  only process Aperture Albums/Flickr Photosets which match REGEX
+ --id              only process photo/album with this id
  --verbose|-v      output verbose information
  --select|-s       regex to select *additional* keys to output
  --dry-run|-n      only output changes to flickr data
@@ -69,7 +70,7 @@ my $config = {};
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num=i', 'album|a=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f',
+	'help|h', 'num=i', 'album|a=s', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -407,9 +408,17 @@ sub aperture_select {
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
 		. ($opts->{album} ? "AND RKFolder.name REGEXP ? " : '')
+		. ($opts->{id}    ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '')
+		. ($opts->{num}   ? "LIMIT ? " : '')
 		. $add
 		);
-	$sth->bind_param(1, $opts->{album}) if $opts->{album};
+	my $param = 1;
+	$sth->bind_param($param++, $opts->{album}) if $opts->{album};
+	if ($opts->{id}) {
+		$sth->bind_param($param++, $opts->{id});
+		$sth->bind_param($param++, $opts->{id});
+	}
+	$sth->bind_param($param++, $opts->{num}) if $opts->{num};
 	$sth->execute();
 
 	return sub {
@@ -471,7 +480,7 @@ sub _filter_keys_rec {
 			}
 		}
 		when ('ARRAY') {
-			foreach my $val ($data) {
+			foreach my $val (@$data) {
 				my $new = _filter_keys_rec($prefix, $select, $val);
 				push $result, $new if defined $new;
 			}
@@ -503,11 +512,14 @@ sub add_keys {
 
 sub flickr_photosets_list {
 	my $album = $opts->{album};
+	my $id = $opts->{id};
 	my $all = flickr_select('photosets.getList', {});
 	return sub {
 		my $row;
 		while ($row = $all->()) {
-			return $row if (!$album || $row->{title} =~ /$album/i);
+			next if $id && $row->{id} ne $id;
+			next if $album && $row->{title} !~ /$album/i;
+			return $row;
 		}
 		return undef;
 	}
@@ -528,7 +540,7 @@ sub with_progressbar {
 			$bar = String::ProgressBar->new(
 				max    => $val->{total},
 				length => 40,
-				text   => encode(locale => sprintf("%20.20s", $opts->{album} && $val->{photoset}{title} ? $val->{photoset}{title} : $text) . ": "),
+				text   => encode(locale => sprintf("%20.20s", $val->{photoset}{title} ? $val->{photoset}{title} : $text) . ": "),
 			);
 		}
 		$oldtitle = $val->{photoset}{title};
@@ -539,10 +551,29 @@ sub with_progressbar {
 	}
 }
 
+sub one_element {
+	my ($el) = @_;
+	return sub {my $r = $el; $el = undef; return $r;};
+}
+
 sub flickr_images {
 	my @args = @_;
-	if ($opts->{album}) {
+	my $sets;
+	if ($opts->{id}) {
+		my $photo;
+		eval {
+			$photo = flickr_api('photos.getInfo', 'photo_id' => $opts->{id});
+		};
+		return one_element($photo) if $photo;
+		my $photoset = flickr_api('photosets.getInfo', 'photoset_id' => $opts->{id});
+		if ($photoset and !$opts->{album} || $photoset->{title} =~ /$opts->{album}/i) {
+			$sets = one_element($photoset);
+		}
+	} elsif ($opts->{album}) {
 		my $sets = flickr_photosets_list();
+	}
+
+	if ($sets) {
 		my ($photos, $set);
 		return sub {
 			while(1) {
