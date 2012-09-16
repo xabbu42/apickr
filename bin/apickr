@@ -31,6 +31,7 @@ Synchronize aperture library given by PATH with flickr.
  --select|-s       regex to select *additional* keys to output
  --dry-run|-n      only output changes to flickr data
  --force|-f        overwrite already existing backups with flickr-backup
+ --exif            add exif data to images
 
 =head1 AUTHOR
 
@@ -58,6 +59,7 @@ use DateTime::Format::Epoch;
 use Carp qw/confess/;
 use String::ProgressBar;
 use File::Slurp;
+use Image::ExifTool qw/ImageInfo/;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -70,7 +72,7 @@ my $config = {};
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num=i', 'album|a=s', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f',
+	'help|h', 'num=i', 'album|a=s', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -89,9 +91,12 @@ given ($command) {
 		));
 	}
 	when ("images") {
-		display(aperture_select(
+		my $gen = aperture_select(
 			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RkVersion.imageDate"
-		));
+		);
+		$gen = aperture_add_exif($gen)
+			if $opts->{exif};
+		display($gen);
 	}
 	when ("flickr") {
 	}
@@ -253,7 +258,7 @@ given ($command) {
 		my $photo;
 		while ($photo = $ickr->()) {
 			my %update;
-			my $exif       = datetime_exif($photo->{exif}{DateTimeOriginal}{raw});
+			my $exif       = datetime_exif($photo->{exif}{DateTimeOriginal});
 			my $datetaken  = datetime_flickr($photo->{datetaken});
 			my $dateupload = datetime_flickr($photo->{dateupload});
 			if (abs(($exif - $datetaken)->in_units('seconds')) > 1) {
@@ -270,17 +275,22 @@ given ($command) {
 		my $select = $opts->{select} // '\b\B';
 		display(
 			filter_keys(
-				qr/id|title|photos|count_views|count_comments|$select/,
-				flickr_photosets_list()
+				qr/^\.(id|title|photos|count_views|count_comments)\b|$select/,
+				flickr_photosets_list(total => $opts->{num})
 			),
 		);
 	}
 	when ("flickr-images") {
 		my $select = $opts->{select} // '\b\B';
+		my $gen = flickr_images();
+		if ($opts->{exif}) {
+			$gen = flickr_add_exif($gen);
+			$select .= '|^\.exif\.';
+		}
 		display(
 			filter_keys(
-				qr/title|photoset.title|datetaken\b|tags|views|sets|$select/,
-				flickr_images()
+				qr/^\.(title|photoset.title|datetaken|tags|views|sets)\b|$select/,
+				$gen,
 			)
 		)
 	}
@@ -434,6 +444,16 @@ sub aperture_select {
 			$row->{imageDate} = datetime_aperture($row->{imageDate});
 		}
 		$dbh->disconnect unless $row;
+		return $row;
+	}
+}
+
+sub aperture_add_exif {
+	my ($gen) = @_;
+	return sub {
+		my $row = $gen->();
+		return undef unless $row;
+		$row->{exif} = ImageInfo($row->{path});
 		return $row;
 	}
 }
@@ -619,7 +639,7 @@ sub flickr_add_exif {
 		my $exif = flickr_photos('getExif', $photo);
 		$photo->{exif}{camera} = $exif->{camera};
 		foreach my $tag (@{$exif->{exif}}) {
-			$photo->{exif}{$tag->{tag}} = $tag;
+			$photo->{exif}{$tag->{tag}} = $tag->{raw};
 		}
 		return $photo;
 	}
