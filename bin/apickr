@@ -375,13 +375,15 @@ sub simplify_flickr_response {
 }
 
 sub flickr_select {
-	my ($method, $args, $select) = @_;
+	my ($method, $args) = @_;
 	my ($resp, $page, $key, $i);
 	my $num = 1;
-	$args->{per_page} = $opts->{num} ? min(500, $opts->{num}) : 500;
+	my $total = $args->{total};
+	delete $args->{total};
+	$args->{per_page} = $total // 500;
 	return sub {
 		if (!$i || $i == @{$resp->{$key}}) {
-			return undef if $key and @{$resp->{$key}} < 500 || $opts->{num};
+			return undef if $key and @{$resp->{$key}} < 500 || $total;
 			$args->{page} = ++$page;
 			$resp = flickr_api($method, %$args);
 			return undef unless $resp;
@@ -390,7 +392,7 @@ sub flickr_select {
 			$i = 0;
 		}
 		my $res = $resp->{$key}[$i++];
-		$res->{total} = $opts->{num} || $resp->{total};
+		$res->{total} = $total // $resp->{total};
 		$res->{num} = $num++;
 		return $res;
 	}
@@ -402,16 +404,16 @@ sub aperture_select {
 	$select .= "," . $opts->{select} if $opts->{select};
 	my $dbpath = catdir($path, 'Database', 'Library.apdb');
 	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
-	my $sth = $dbh->prepare(
+	my $sql =
 		"Select $select FROM RKVersion"
 		. " JOIN RKFolder ON RKFolder.uuid = RKVersion.projectUuid"
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
 		. ($opts->{album} ? "AND RKFolder.name REGEXP ? " : '')
 		. ($opts->{id}    ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '')
-		. ($opts->{num}   ? "LIMIT ? " : '')
 		. $add
-		);
+		. ($opts->{num}   ? " LIMIT ? " : '');
+	my $sth = $dbh->prepare($sql);
 	my $param = 1;
 	$sth->bind_param($param++, $opts->{album}) if $opts->{album};
 	if ($opts->{id}) {
@@ -513,12 +515,18 @@ sub add_keys {
 sub flickr_photosets_list {
 	my $album = $opts->{album};
 	my $id = $opts->{id};
-	my $all = flickr_select('photosets.getList', {});
+	my $args = {@_};
+	my $total = $args->{total};
+	delete $args->{total} if $album;
+	my $num;
+	my $all = flickr_select('photosets.getList', $args);
 	return sub {
 		my $row;
+		return undef if $total && $num >= $total;
 		while ($row = $all->()) {
 			next if $id && $row->{id} ne $id;
 			next if $album && $row->{title} !~ /$album/i;
+			$num++;
 			return $row;
 		}
 		return undef;
@@ -570,32 +578,35 @@ sub flickr_images {
 			$sets = one_element($photoset);
 		}
 	} elsif ($opts->{album}) {
-		my $sets = flickr_photosets_list();
+		$sets = flickr_photosets_list();
 	}
 
 	if ($sets) {
-		my ($photos, $set);
+		my ($photos, $set, $num);
 		return sub {
 			while(1) {
-				return undef unless $set || ($set = $sets->());
+				return undef unless $set || ($set = $sets->()) && (!$opts->{num} || $num < $opts->{num});
 				if (!$photos) {
 					$photos = add_keys(
 						{photoset => $set},
 						flickr_select(
 							'photosets.getPhotos',
-							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @args}
+							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @args, total => $opts->{num}}
 						)
 						);
 				}
 				my $photo = $photos->();
-				return $photo if $photo;
+				if ($photo) {
+					$num++;
+					return $photo;
+				}
 				$set = undef; $photos = undef;
 			}
 		}
 	} else {
 		return flickr_select(
 			'people.getPhotos',
-			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @args},
+			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @args, total => $opts->{num}},
 		);
 	}
 }
