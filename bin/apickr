@@ -294,7 +294,7 @@ given ($command) {
 				qr/^\.(title|photoset.title|datetaken|tags|views|sets)\b|$select/,
 				$gen,
 			)
-		)
+		);
 	}
 	default {die "Unknown command $_"}
 };
@@ -477,7 +477,7 @@ sub datetime_exif {
 	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
 	state $parser = DateTime::Format::Strptime->new(pattern => '%Y:%m:%d %H:%M:%S');
 	my ($val) = @_;
-	my $res = $parser->parse_datetime($val) or die "Could not parse exif date $val";
+	my $res = $parser->parse_datetime($val) or die "Could not parse exif date '$val'";
 	$res->set_formatter($formatter);
 	return $res;
 }
@@ -665,7 +665,6 @@ sub flickr_add_exif {
 		my $photo = $gen->();
 		return undef unless $photo;
 		my $exif = flickr_photos('getExif', $photo);
-		$photo->{exif}{camera} = $exif->{camera};
 		foreach my $tag (@{$exif->{exif}}) {
 			$photo->{exif}{$tag->{tag}} = $tag->{raw};
 		}
