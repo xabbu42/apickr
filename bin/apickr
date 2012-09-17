@@ -26,6 +26,8 @@ Synchronize aperture library given by PATH with flickr.
  --help|-h         brief help message
  --num=NUM         only process NUM items
  --album|-a=REGEX  only process Aperture Albums/Flickr Photosets which match REGEX
+ --title|-t=REGEX  only process Images which match REGEX
+ --word|-w         only match album or title at word boundaries
  --id              only process photo/album with this id
  --verbose|-v      output verbose information
  --select|-s       regex to select *additional* keys to output
@@ -72,7 +74,7 @@ my $config = {};
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num=i', 'album|a=s', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif',
+	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -420,12 +422,14 @@ sub aperture_select {
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
 		. ($opts->{album} ? "AND RKFolder.name REGEXP ? " : '')
+		. ($opts->{title} ? "AND RKVersion.name REGEXP ? " : '')
 		. ($opts->{id}    ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '')
 		. $add
 		. ($opts->{num}   ? " LIMIT ? " : '');
 	my $sth = $dbh->prepare($sql);
 	my $param = 1;
 	$sth->bind_param($param++, $opts->{album}) if $opts->{album};
+	$sth->bind_param($param++, $opts->{title}) if $opts->{title};
 	if ($opts->{id}) {
 		$sth->bind_param($param++, $opts->{id});
 		$sth->bind_param($param++, $opts->{id});
@@ -534,6 +538,7 @@ sub add_keys {
 
 sub flickr_photosets_list {
 	my $album = $opts->{album};
+	$album = "\\b$album\\b" if $opts->{word} and $album;
 	my $id = $opts->{id};
 	my $args = {@_};
 	my $total = $args->{total};
@@ -586,6 +591,8 @@ sub one_element {
 
 sub flickr_images {
 	my @args = @_;
+	my $album = $opts->{album};
+	$album = "\\b$album\\b" if $opts->{word} and $album;
 	my $sets;
 	if ($opts->{id}) {
 		my $photo;
@@ -594,16 +601,17 @@ sub flickr_images {
 		};
 		return one_element($photo) if $photo;
 		my $photoset = flickr_api('photosets.getInfo', 'photoset_id' => $opts->{id});
-		if ($photoset and !$opts->{album} || $photoset->{title} =~ /$opts->{album}/i) {
+		if ($photoset and !$album || $photoset->{title} =~ /$album/i) {
 			$sets = one_element($photoset);
 		}
 	} elsif ($opts->{album}) {
 		$sets = flickr_photosets_list();
 	}
 
+	my $gen;
 	if ($sets) {
 		my ($photos, $set, $num);
-		return sub {
+		$gen = sub {
 			while(1) {
 				return undef unless $set || ($set = $sets->()) && (!$opts->{num} || $num < $opts->{num});
 				if (!$photos) {
@@ -623,11 +631,31 @@ sub flickr_images {
 				$set = undef; $photos = undef;
 			}
 		}
+	} elsif ($opts->{title} && $opts->{title} =~ /^[\w\s_]+$/ && $opts->{word}) {
+		$gen = flickr_select(
+			'photos.search',
+			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', text => $opts->{title}}
+		);
 	} else {
-		return flickr_select(
+		warn "Using complex --title or omitting --word causes slow scan of *all* the images in the flickr account!\n" if $opts->{title};
+		$gen = flickr_select(
 			'people.getPhotos',
 			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @args, total => $opts->{num}},
 		);
+	}
+	if ($opts->{title}) {
+		my $title = $opts->{title};
+		$title = "\\b$title\\b" if $opts->{word};
+		return sub {
+			while (1) {
+				my $photo = $gen->();
+				return undef unless $photo;
+				next unless $photo->{title} =~ /$title/i;
+				return $photo;
+			}
+		}
+	} else {
+		return $gen;
 	}
 }
 
