@@ -468,7 +468,7 @@ sub datetime_aperture {
 		epoch => DateTime->new(year => 2001, month => 1, day => 1),
 		);
 	my ($val) = @_;
-	my $res = $macepoch->parse_datetime(shift) or die "Could not parse aperture date $val";
+	my $res = $macepoch->parse_datetime(shift) or die "Could not parse aperture date '$val'\n";
 	$res->set_formatter($formatter);
 	return $res;
 }
@@ -477,7 +477,7 @@ sub datetime_exif {
 	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
 	state $parser = DateTime::Format::Strptime->new(pattern => '%Y:%m:%d %H:%M:%S');
 	my ($val) = @_;
-	my $res = $parser->parse_datetime($val) or die "Could not parse exif date '$val'";
+	my $res = $parser->parse_datetime($val) or die "Could not parse exif date '$val'\n";
 	$res->set_formatter($formatter);
 	return $res;
 }
@@ -489,7 +489,7 @@ sub datetime_flickr {
 	if ($val =~ /^\d+$/) {
 		$res = DateTime->from_epoch(epoch => $val);
 	} else {
-		($res = $formatter->parse_datetime($val)) or die "Could not parse flickr date $val";
+		($res = $formatter->parse_datetime($val)) or die "Could not parse flickr date '$val'\n";
 	}
 	$res->set_formatter($formatter);
 	return $res;
