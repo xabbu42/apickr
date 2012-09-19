@@ -599,7 +599,19 @@ sub flickr_images {
 		eval {
 			$photo = flickr_api('photos.getInfo', 'photo_id' => $opts->{id});
 		};
-		return one_element($photo) if $photo;
+		if ($photo) {
+			$photo->{total} = $photo->{num} = 1;
+			$photo->{datetaken} = $photo->{dates}{taken};
+			$photo->{dateupload} = $photo->{dateuploaded};
+			delete $photo->{dateuploaded};
+			$photo->{datetakengranularity} = $photo->{dates}{takengranularity};
+			delete $photo->{dates};
+			$photo->{$_} = $photo->{visibility}{$_} foreach keys %{$photo->{visibility}};
+			delete $photo->{visibility};
+			$photo->{owner} = $photo->{owner}{nsid};
+			$photo->{tags} = join ",", map {$_->{_content}} values %{$photo->{tags}};
+			return one_element($photo);
+		}
 		my $photoset = flickr_api('photosets.getInfo', 'photoset_id' => $opts->{id});
 		if ($photoset and !$album || $photoset->{title} =~ /$album/i) {
 			$sets = one_element($photoset);
