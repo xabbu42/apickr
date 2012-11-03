@@ -34,6 +34,7 @@ Synchronize aperture library given by PATH with flickr.
  --dry-run|-n      only output changes to flickr data
  --force|-f        overwrite already existing backups with flickr-backup
  --exif            add exif data to images
+ --fix-date-upload also set the upload date to the date taken in flickr-fix
 
 =head1 AUTHOR
 
@@ -77,7 +78,7 @@ my $config = {};
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif',
+	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif', 'fix-date-upload',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -278,10 +279,12 @@ given ($command) {
 			if (abs(($exif_date - $datetaken)->in_units('seconds')) > 1) {
 				$update{date_taken} = "" . $exif_date;
 			}
-			my $correct_dateupload = $update{date_taken} ? $exif_date->epoch : $datetaken->epoch;
-			$correct_dateupload = max($joindate->epoch(), $correct_dateupload);
-			if ($dateupload->epoch != $correct_dateupload) {
-				$update{date_posted} = $correct_dateupload;
+			if ($opts->{'fix-date-upload'}) {
+				my $correct_dateupload = $update{date_taken} ? $exif_date->epoch : $datetaken->epoch;
+				$correct_dateupload = max($joindate->epoch(), $correct_dateupload);
+				if ($dateupload->epoch != $correct_dateupload) {
+					$update{date_posted} = $correct_dateupload;
+				}
 			}
 			flickr_photos('setDates', $photo, %update)
 				if (%update);
