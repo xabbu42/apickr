@@ -58,11 +58,13 @@ use Encode::Locale;
 use DateTime;
 use DateTime::Format::Strptime;
 use DateTime::Format::Epoch;
+use DateTime::Format::Flexible;
 use Carp qw/confess cluck/;
 use String::ProgressBar;
 use File::Slurp;
 use Image::ExifTool qw/ImageInfo GetAllTags/;
 use Image::ExifTool::TagLookup qw/FindTagInfo/;
+use LWP::Simple qw/get/;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -255,25 +257,37 @@ given ($command) {
 		}
 	}
 
-
 	when ("flickr-fix") {
-		my $ickr = with_progressbar(flickr_add_exif(flickr_images()));
+		my $ickr = flickr_add_exif(with_progressbar(flickr_images()));
+		my $auth = flickr_auth();
+		my $me = flickr_api('people.getInfo', user_id => $auth->{user}{nsid});
+		my $profile_html = get($me->{profileurl});
+		$profile_html =~ m{<dt>Joined:</dt>\n\s*<dd>(.*?)</dd>}
+			or die "Could not get joined date!\n";
+		my $joindate = DateTime::Format::Flexible->parse_datetime($1);
+		$joindate->add(months => 1);
 		my $photo;
+		warn "Will only set date_posted after found join date: " . $joindate . "\n";
 		while ($photo = $ickr->()) {
 			my %update;
-			my $exif       = datetime_exif($photo->{exif}{DateTimeOriginal});
+			my $exif_date_str  = $photo->{exif}{DateTimeOriginal} || $photo->{exif}{ModifyDate};
+			my $exif_date      = datetime_exif($exif_date_str) if $exif_date_str;
+			next unless $exif_date;
 			my $datetaken  = datetime_flickr($photo->{datetaken});
 			my $dateupload = datetime_flickr($photo->{dateupload});
-			if (abs(($exif - $datetaken)->in_units('seconds')) > 1) {
-				$update{date_taken} = "" . $exif;
+			if (abs(($exif_date - $datetaken)->in_units('seconds')) > 1) {
+				$update{date_taken} = "" . $exif_date;
 			}
-			if ($update{date_taken} && $dateupload != $exif || $dateupload != $datetaken) {
-				$update{date_posted} = $update{date_taken} ? $exif->epoch : $datetaken->epoch;
+			my $correct_dateupload = $update{date_taken} ? $exif_date->epoch : $datetaken->epoch;
+			$correct_dateupload = max($joindate->epoch(), $correct_dateupload);
+			if ($dateupload->epoch != $correct_dateupload) {
+				$update{date_posted} = $correct_dateupload;
 			}
 			flickr_photos('setDates', $photo, %update)
 				if (%update);
 		}
 	}
+
 	when ("flickr-photosets") {
 		my $select = $opts->{select} // '\b\B';
 		display(
