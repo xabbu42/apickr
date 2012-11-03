@@ -61,7 +61,8 @@ use DateTime::Format::Epoch;
 use Carp qw/confess cluck/;
 use String::ProgressBar;
 use File::Slurp;
-use Image::ExifTool qw/ImageInfo/;
+use Image::ExifTool qw/ImageInfo GetAllTags/;
+use Image::ExifTool::TagLookup qw/FindTagInfo/;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -684,9 +685,13 @@ sub flickr_add_exif {
 	return sub {
 		my $photo = $gen->();
 		return undef unless $photo;
-		my $exif = flickr_photos('getExif', $photo);
-		foreach my $tag (@{$exif->{exif}}) {
-			$photo->{exif}{$tag->{tag}} = $tag->{raw};
+		my $response = flickr_photos('getExif', $photo);
+		my $tagtable = Image::ExifTool::GetTagTable('Image::ExifTool::Exif::Main');
+		if ($response->{exif} and ref $response->{exif} eq 'ARRAY') {
+			foreach my $tag (@{$response->{exif}}) {
+				my ($info) = Image::ExifTool::GetTagInfoList($tagtable, $tag->{tag});
+				$photo->{exif}{$info->{Name} || $tag->{tag}} = $tag->{raw};
+			}
 		}
 		return $photo;
 	}
