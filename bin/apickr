@@ -58,7 +58,7 @@ use Encode::Locale;
 use DateTime;
 use DateTime::Format::Strptime;
 use DateTime::Format::Epoch;
-use Carp qw/confess/;
+use Carp qw/confess cluck/;
 use String::ProgressBar;
 use File::Slurp;
 use Image::ExifTool qw/ImageInfo/;
@@ -334,12 +334,20 @@ sub flickr_api {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef if $opts->{'dry-run'};
 	}
-	eval {
-		$req = $api->execute_method('flickr.' . $method, $params);
+	while(1) {
+		eval {
+			$req = $api->execute_method('flickr.' . $method, {%$params});
+		};
+		if ($@ && (!$params->{page} || $params->{page} == 1)) {
+			if ($@ =~ /HTTP status: 504/) {
+				cluck $@;
+			} else {
+				confess $@;
+			}
+		} else {
+			last;
+		}
 	};
-	if ($@ && (!$params->{page} || $params->{page} == 1)) {
-		confess $@
-	}
 	if ($req && $req->{stat} eq 'ok') {
 		delete $req->{stat};
 		if (%$req) {
