@@ -46,6 +46,8 @@ use Modern::Perl;
 use autodie;
 use common::sense;
 
+use Coro;
+use Coro::LWP;
 use Getopt::Long qw/:config/;
 use Pod::Usage;
 use YAML qw/LoadFile DumpFile Load Dump/;
@@ -112,10 +114,11 @@ given ($command) {
 		open my $file, ">", $path;
 		$file->print(encode_utf8(Dump($opts)));
 		$file->print(Dump(undef));
-		my $photos = with_progressbar(flickr_images(extras => ''), 'Photos');
+		my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_images(extras => ''), 'Photos')));
 		my (@photosets_list, %photosets_hash);
 		while (my $photo = $photos->()) {
-			my $backup = flickr_photo_backup($photo);
+			my $backup = {%$photo, %{$photo->{info}}};
+			delete $photo->{info};
 			$file->print(encode_utf8(Dump($backup)));
 			if (%{$photo->{photoset}}) {
 				my $id = $photo->{photoset}{id};
@@ -125,13 +128,14 @@ given ($command) {
 			}
 		}
 		$file->print(Dump(undef));
-		my $photosets = with_progressbar(
+		my $photosets = parallelize(flickr_add_photoset_info(with_progressbar(
 			@photosets_list ? sub {$photosets_hash{shift @photosets_list}}
 			                : flickr_photosets_list(),
 			'Photosets',
-		);
+		)));
 		while (my $photoset = $photosets->()) {
-			my $backup = flickr_photoset_backup($photoset);
+			my $backup = {%$photoset, %{$photoset->{info}}};
+			delete $photoset->{info};
 			$file->print(encode_utf8(Dump($backup)));
 		}
 		$file->close();
@@ -143,17 +147,9 @@ given ($command) {
 		my ($opts_yaml, $photo_backups_yaml, $photoset_backups_yaml) =
 			map {my @res = split "---", $_; shift @res; \@res;} split("--- ~", decode_utf8(read_file($path)));
 		$opts = {%$opts, %{Load($opts_yaml->[0])}};
-		my $photo_backups = with_progressbar(sub { Load(shift $photo_backups_yaml) }, 'Photos');
-		my $photoset_backups = with_progressbar(sub {
-			state $i = 0;
-			my $res = Load($photoset_backups_yaml->[$i++]);
-			return undef unless $res;
-			$res->{total} = +@$photoset_backups_yaml;
-			$res->{num} = $i;
-			return $res;
-		}, 'Photosets');
+		my $photo_backups = parallelize(flickr_add_photo_info(with_progressbar(sub { Load(shift $photo_backups_yaml) }, 'Photos')));
 		while (my $old = $photo_backups->()) {
-			my $new = flickr_photo_backup({id => $old->{id}});
+			my $new = $old->{info};
 
 			if (!$new) {
 				warn "Photo with id $old->{id} not found\n";
@@ -237,15 +233,25 @@ given ($command) {
 					flickr_photos('people.editCoords', $old, 'user_id' => $p->{nsid}, %coords);
 				}
 			}
-			foreach my $q (values $new->{people}{list}) {
-				unless ($old->{people}{list}{$q->{nsid}}) {
-					flickr_photos('people.delete', $old, 'user_id' => $q->{nsid});
+			if ($new->{people}{list}) {
+				foreach my $q (values $new->{people}{list}) {
+					unless ($old->{people}{list}{$q->{nsid}}) {
+						flickr_photos('people.delete', $old, 'user_id' => $q->{nsid});
+					}
 				}
 			}
 		}
 
+		my $photoset_backups = parallelize(flickr_add_photoset_info(with_progressbar(sub {
+			state $i = 0;
+			my $res = Load($photoset_backups_yaml->[$i++]);
+			return undef unless $res;
+			$res->{total} = +@$photoset_backups_yaml;
+			$res->{num} = $i;
+			return $res;
+		}, 'Photosets')));
 		while (my $old = $photoset_backups->()) {
-			my $new = flickr_photoset_backup({id => $old->{id}});
+			my $new = $old->{info};
 			my $oldorder = join(",", @{$old->{order}});
 			if ($oldorder ne join(",", @{$new->{order}})) {
 				flickr_photosets('editPhotos', $old, primary_photo_id => $old->{primary}, photo_ids => $oldorder);
@@ -259,7 +265,6 @@ given ($command) {
 	}
 
 	when ("flickr-fix") {
-		my $ickr = flickr_add_exif(with_progressbar(flickr_images()));
 		my $auth = flickr_auth();
 		my $me = flickr_api('people.getInfo', user_id => $auth->{user}{nsid});
 		my $profile_html = get($me->{profileurl});
@@ -269,6 +274,7 @@ given ($command) {
 		$joindate->add(months => 1);
 		my $photo;
 		warn "Will only set date_posted after found join date: " . $joindate . "\n";
+		my $ickr = parallelize(flickr_add_exif(with_progressbar(flickr_images())));
 		while ($photo = $ickr->()) {
 			my %update;
 			my $exif_date_str  = $photo->{exif}{DateTimeOriginal} || $photo->{exif}{ModifyDate};
@@ -304,7 +310,7 @@ given ($command) {
 		my $select = $opts->{select} // '\b\B';
 		my $gen = flickr_images();
 		if ($opts->{exif}) {
-			$gen = flickr_add_exif($gen);
+			$gen = parallelize(flickr_add_exif($gen));
 			$select .= '|^\.exif\.';
 		}
 		display(
@@ -414,24 +420,37 @@ sub simplify_flickr_response {
 
 sub flickr_select {
 	my ($method, $args) = @_;
-	my ($resp, $page, $key, $i);
+	my ($resp, $page, $key, $i, $nextpage_coro);
 	my $num = 1;
 	my $total = $args->{total};
 	delete $args->{total};
-	$args->{per_page} = $total // 500;
+	$args->{per_page} = $total // 200;
+	my $semaphore = Coro::Semaphore->new();
 	return sub {
-		if (!$i || $i == @{$resp->{$key}}) {
-			return undef if $key and @{$resp->{$key}} < 500 || $total;
-			$args->{page} = ++$page;
-			$resp = flickr_api($method, %$args);
-			return undef unless $resp;
-			$key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
-			return undef unless $key && @{$resp->{$key}};
+		$semaphore->down;
+		if (!$nextpage_coro and (!$i || (($i >= @{$resp->{$key}} * (3/4)) && (@{$resp->{$key}} == $args->{per_page}) && !$total))) {
+			$nextpage_coro = async {
+				$args->{page} = ++$page;
+				my $resp = flickr_api($method, %$args);
+				return undef unless $resp;
+				my $key = first {ref($resp->{$_}) eq 'ARRAY'} keys %$resp;
+				return undef unless $key && @{$resp->{$key}};
+				return ($resp, $key);
+			}
+		}
+		if (!$i or $i == @{$resp->{$key}}) {
+			if (!$nextpage_coro) {
+				$semaphore->up;
+				return undef;
+			}
+			($resp, $key) = $nextpage_coro->join();
+			$nextpage_coro = undef;
 			$i = 0;
 		}
 		my $res = $resp->{$key}[$i++];
 		$res->{total} = $total // $resp->{total};
 		$res->{num} = $num++;
+		$semaphore->up;
 		return $res;
 	}
 }
@@ -543,6 +562,7 @@ sub _filter_keys_rec {
 	}
 	return $result;
 }
+
 sub filter_keys {
 	my ($select, $gen) = @_;
 	return $gen if ($opts->{verbose});
@@ -586,12 +606,12 @@ sub flickr_photosets_list {
 
 sub with_progressbar {
 	my ($gen, $text) = @_;
-	my ($bar, $oldtitle);
+	my ($bar, $oldtitle, $wrote_newline);
 	$| = 1;
 	return sub {
 		my $val = $gen->();
 		unless (defined $val) {
-			print "\n";
+			print "\n" unless $wrote_newline++;
 			return undef;
 		}
 		if ($oldtitle && $val->{photoset}{title} ne $oldtitle or !$bar) {
@@ -608,6 +628,24 @@ sub with_progressbar {
 		$bar->write;
 		return $val;
 	}
+}
+
+sub parallelize {
+	my ($gen, $step) = @_;
+	my $channel = Coro::Channel->new();
+	my $active_coros = 30;
+	foreach my $i (0..($active_coros-1)) {
+		async {
+			my $next;
+			do {
+				$next = $gen->();
+				$channel->put($next) if $next;
+			} while ($next);
+			$active_coros--;
+			$channel->put(undef) unless $active_coros;
+		}
+	}
+	return sub { return $active_coros ? $channel->get : undef; };
 }
 
 sub one_element {
@@ -714,26 +752,32 @@ sub flickr_add_exif {
 	}
 }
 
-sub flickr_photo_backup {
-	my ($photo) = @_;
-	my $info = flickr_photos('getInfo', $photo);
-	$photo->{$_} = $info->{$_} foreach keys $info;
-	$photo->{people}{list} = $photo->{people}{haspeople} ? ${flickr_photos('people.getList', $photo)}{person} : {};
-	return $photo;
+sub flickr_add_photo_info {
+	my ($gen) = @_;
+	return sub {
+		my $photo = $gen->();
+		return undef unless $photo;
+		$photo->{info} = flickr_photos('getInfo', $photo);
+		if ($photo->{people}{haspeople}) {
+			$photo->{info}{people}{list} = ${flickr_photos('people.getList', $photo)}{person};
+		}
+		return $photo;
+	}
 }
 
-sub flickr_photoset_backup {
-	my ($photoset) = @_;
-	my $info = flickr_photosets('getInfo', $photoset);
-	$photoset->{$_} = $info->{$_} foreach keys $info;
-	unless (defined $photoset->{order}) {
+sub flickr_add_photoset_info {
+	my ($gen) = @_;
+	return sub {
+		my $photoset = $gen->();
+		return undef unless $photoset;
+		$photoset->{info} = flickr_photosets('getInfo', $photoset);
 		my $photos = flickr_select('photosets.getPhotos', {photoset_id => $photoset->{id}, extras => ''});
 		while (my $photo = $photos->()) {
-			$photoset->{order}[$photo->{num}-1] = $photo->{id};
-			$photoset->{primary} = $photo->{id} if $photo->{isprimary};
+			$photoset->{info}{order}[$photo->{num}-1] = $photo->{id};
+			$photoset->{info}{primary} = $photo->{id} if $photo->{isprimary};
 		}
+		return $photoset;
 	}
-	return $photoset;
 }
 
 sub display {
