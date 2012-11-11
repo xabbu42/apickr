@@ -149,7 +149,13 @@ given ($command) {
 		my ($opts_yaml, $photo_backups_yaml, $photoset_backups_yaml) =
 			map {my @res = split "---", $_; shift @res; \@res;} split("--- ~", decode_utf8(read_file($path)));
 		$opts = {%$opts, %{Load($opts_yaml->[0])}};
-		my $photo_backups = parallelize(flickr_add_photo_info(with_progressbar(sub { Load(shift $photo_backups_yaml) }, 'Photos')));
+		my $photo_backups = parallelize(
+			flickr_add_photo_info(
+				flickr_filter_photos(
+					with_progressbar(sub { Load(shift $photo_backups_yaml) }, 'Photos')
+				)
+			)
+		);
 		while (my $old = $photo_backups->()) {
 			my $new = $old->{info};
 
@@ -244,14 +250,21 @@ given ($command) {
 			}
 		}
 
-		my $photoset_backups = parallelize(flickr_add_photoset_info(with_progressbar(sub {
-			state $i = 0;
-			my $res = Load($photoset_backups_yaml->[$i++]);
-			return undef unless $res;
-			$res->{total} = +@$photoset_backups_yaml;
-			$res->{num} = $i;
-			return $res;
-		}, 'Photosets')));
+		my $photoset_backups = parallelize(
+			flickr_add_photoset_info(
+				with_progressbar(
+					flickr_filter_photosets( sub {
+						state $i = 0;
+						my $res = Load($photoset_backups_yaml->[$i++]);
+						return undef unless $res;
+						$res->{total} = +@$photoset_backups_yaml;
+						$res->{num} = $i;
+						return $res;
+					}),
+					'Photosets'
+				)
+			)
+		);
 		while (my $old = $photoset_backups->()) {
 			my $new = $old->{info};
 			my $oldorder = join(",", @{$old->{order}});
@@ -583,8 +596,7 @@ sub add_keys {
 }
 
 sub flickr_photosets_list {
-	my $album = $opts->{album};
-	$album = "\\b$album\\b" if $opts->{word} and $album;
+	my $album = regex_search($opts->{album});
 	my $id = $opts->{id};
 	my $args = {@_};
 	my $total = $args->{total};
@@ -655,9 +667,7 @@ sub one_element {
 
 sub flickr_images {
 	my @args = @_;
-	my $album = $opts->{album};
-	$album = "\\b$album\\b" if $opts->{word} and $album;
-	my $sets;
+	my ($sets, $gen);
 	if ($opts->{id}) {
 		my $photo;
 		eval {
@@ -674,17 +684,15 @@ sub flickr_images {
 			delete $photo->{visibility};
 			$photo->{owner} = $photo->{owner}{nsid};
 			$photo->{tags} = join ",", map {$_->{_content}} values %{$photo->{tags}};
-			return one_element($photo);
-		}
-		my $photoset = flickr_api('photosets.getInfo', 'photoset_id' => $opts->{id});
-		if ($photoset and !$album || $photoset->{title} =~ /$album/i) {
+			$gen = one_element($photo);
+		} else {
+			my $photoset = flickr_api('photosets.getInfo', 'photoset_id' => $opts->{id});
 			$sets = one_element($photoset);
 		}
 	} elsif ($opts->{album}) {
 		$sets = flickr_photosets_list();
 	}
 
-	my $gen;
 	if ($sets) {
 		my ($photos, $set, $num);
 		my $semaphore = Coro::Semaphore->new();
@@ -710,31 +718,57 @@ sub flickr_images {
 				$set = undef; $photos = undef;
 			}
 		}
-	} elsif ($opts->{title} && $opts->{title} =~ /^[\w\s_]+$/ && $opts->{word}) {
-		$gen = flickr_select(
-			'photos.search',
-			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', text => $opts->{title}}
-		);
-	} else {
-		warn "Using complex --title or omitting --word causes slow scan of *all* the images in the flickr account!\n" if $opts->{title};
-		$gen = flickr_select(
-			'people.getPhotos',
-			{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @args, total => $opts->{num}},
-		);
-	}
-	if ($opts->{title}) {
-		my $title = $opts->{title};
-		$title = "\\b$title\\b" if $opts->{word};
-		return sub {
-			while (1) {
-				my $photo = $gen->();
-				return undef unless $photo;
-				next unless $photo->{title} =~ /$title/i;
-				return $photo;
-			}
+	} elsif (!$gen) {
+		if ($opts->{title} && $opts->{title} =~ /^[\w\s_]+$/ && $opts->{word}) {
+			$gen = flickr_select(
+				'photos.search',
+				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', text => $opts->{title}}
+			);
+		} else {
+			warn "Using complex --title or omitting --word causes slow scan of *all* the images in the flickr account!\n" if $opts->{title};
+			$gen = flickr_select(
+				'people.getPhotos',
+				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @args, total => $opts->{num}},
+			);
 		}
-	} else {
-		return $gen;
+	}
+
+	return flickr_filter_photos($gen);
+}
+
+sub regex_search {
+	my ($search) = @_;
+	$search = "\\b$search\\b" if $search and $opts->{word};
+	return $search ? qr/$search/i : undef;
+}
+
+sub flickr_filter_photosets {
+	my ($gen) = @_;
+	my $album = regex_search($opts->{album});
+	return sub {
+		while (1) {
+			my $set = $gen->();
+			return undef unless $set;
+			next unless !$opts->{id} or $set->{id} == $opts->{id};
+			next unless !$album or $set->{title} =~ $album;
+			return $set;
+		}
+	}
+}
+
+sub flickr_filter_photos {
+	my ($gen) = @_;
+	my $title = regex_search($opts->{title});
+	my $album = regex_search($opts->{album});
+	return sub {
+		while (1) {
+			my $photo = $gen->();
+			return undef unless $photo;
+			next unless !$title or $photo->{title} =~ $title;
+			next unless !$opts->{id} or $photo->{id} == $opts->{id};
+			next unless !$album or $photo->{photoset}{title} =~ $album;
+			return $photo;
+		}
 	}
 }
 
@@ -793,6 +827,15 @@ sub display {
 sub d {
 	my ($row) = @_;
 	return Dump(encode_rec($row));
+}
+
+sub pd {
+	my ($gen) = @_;
+	return sub {
+		my $next = $gen->();
+		say d($next) if $next;
+		return $next;
+	}
 }
 
 sub encode_rec {
