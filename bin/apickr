@@ -50,7 +50,8 @@ use Coro;
 use Coro::LWP;
 use Getopt::Long qw/:config/;
 use Pod::Usage;
-use YAML qw/LoadFile DumpFile Load Dump/;
+use YAML::Syck qw/LoadFile DumpFile Load Dump/;
+$YAML::Syck::ImplicitUnicode = 1;
 use DBI;
 use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
@@ -632,7 +633,7 @@ sub with_progressbar {
 sub parallelize {
 	my ($gen, $step) = @_;
 	my $channel = Coro::Channel->new();
-	my $active_coros = 30;
+	my $active_coros = 10;
 	foreach my $i (0..($active_coros-1)) {
 		async {
 			my $next;
