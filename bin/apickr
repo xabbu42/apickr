@@ -427,7 +427,7 @@ sub flickr_select {
 	$args->{per_page} = $total // 200;
 	my $semaphore = Coro::Semaphore->new();
 	return sub {
-		$semaphore->down;
+		my $guard = $semaphore->guard();
 		if (!$nextpage_coro and (!$i || (($i >= @{$resp->{$key}} * (3/4)) && (@{$resp->{$key}} == $args->{per_page}) && !$total))) {
 			$nextpage_coro = async {
 				$args->{page} = ++$page;
@@ -440,7 +440,6 @@ sub flickr_select {
 		}
 		if (!$i or $i == @{$resp->{$key}}) {
 			if (!$nextpage_coro) {
-				$semaphore->up;
 				return undef;
 			}
 			($resp, $key) = $nextpage_coro->join();
@@ -450,7 +449,6 @@ sub flickr_select {
 		my $res = $resp->{$key}[$i++];
 		$res->{total} = $total // $resp->{total};
 		$res->{num} = $num++;
-		$semaphore->up;
 		return $res;
 	}
 }
