@@ -686,8 +686,11 @@ sub flickr_images {
 	my $gen;
 	if ($sets) {
 		my ($photos, $set, $num);
+		my $semaphore = Coro::Semaphore->new();
+		$sets = flickr_filter_photosets($sets);
 		$gen = sub {
 			while(1) {
+				my $guard = $semaphore->guard();
 				return undef unless $set || ($set = $sets->()) && (!$opts->{num} || $num < $opts->{num});
 				if (!$photos) {
 					$photos = add_keys(
@@ -696,7 +699,7 @@ sub flickr_images {
 							'photosets.getPhotos',
 							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @args, total => $opts->{num}}
 						)
-						);
+					);
 				}
 				my $photo = $photos->();
 				if ($photo) {
