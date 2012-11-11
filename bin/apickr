@@ -56,7 +56,7 @@ use Flickr::API2;
 use File::Spec::Functions qw/splitpath catdir/;
 use Browser::Open qw/open_browser/;
 use List::AllUtils qw/first max min any all sum/;
-use Encode qw/encode_utf8 decode_utf8 encode decode/;
+use Encode qw/decode_utf8 encode decode/;
 use Encode::Locale;
 use DateTime;
 use DateTime::Format::Strptime;
@@ -111,15 +111,16 @@ given ($command) {
 	when ("flickr-backup") {
 		my $path = shift() or die "No path for backup file given!\n";
 		die "Will not overwrite existing file $path!\n" if -e $path && !$opts->{force};
-		open my $file, ">", $path;
-		$file->print(encode_utf8(Dump($opts)));
+		open my $file, ">:encoding(UTF-8)", $path;
+		$file->print(Dump($opts));
 		$file->print(Dump(undef));
 		my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_images(extras => ''), 'Photos')));
 		my (@photosets_list, %photosets_hash);
 		while (my $photo = $photos->()) {
 			my $backup = {%$photo, %{$photo->{info}}};
-			delete $photo->{info};
-			$file->print(encode_utf8(Dump($backup)));
+			delete $backup->{info};
+			$backup->{people}{list} = $photo->{info}{people}{list};
+			$file->print(Dump($backup));
 			if (%{$photo->{photoset}}) {
 				my $id = $photo->{photoset}{id};
 				push @photosets_list, $id unless $photosets_hash{$id};
@@ -136,7 +137,7 @@ given ($command) {
 		while (my $photoset = $photosets->()) {
 			my $backup = {%$photoset, %{$photoset->{info}}};
 			delete $photoset->{info};
-			$file->print(encode_utf8(Dump($backup)));
+			$file->print(Dump($backup));
 		}
 		$file->close();
 	}
@@ -756,9 +757,9 @@ sub flickr_add_photo_info {
 		my $photo = $gen->();
 		return undef unless $photo;
 		$photo->{info} = flickr_photos('getInfo', $photo);
-		if ($photo->{people}{haspeople}) {
-			$photo->{info}{people}{list} = ${flickr_photos('people.getList', $photo)}{person};
-		}
+		$photo->{info}{people}{list} = $photo->{people}{haspeople}
+		                               ? ${flickr_photos('people.getList', $photo)}{person}
+		                               : {};
 		return $photo;
 	}
 }
