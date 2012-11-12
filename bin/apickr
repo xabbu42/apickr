@@ -17,9 +17,9 @@ Synchronize aperture library given by PATH with flickr.
   flickr              sync with flickr
   flickr-fix          fix flickr dates from exif
   flickr-photosets    list flickr photosets
-  flickr-images       list flickr images
-  flickr-backup PATH  backup metadata for selected images to PATH
-  flickr-restore PATH restore metadata for selected images from PATH
+  flickr-photos       list flickr photos
+  flickr-backup PATH  backup metadata for selected photos to PATH
+  flickr-restore PATH restore metadata for selected photos from PATH
 
 =head1 OPTIONS
 
@@ -33,7 +33,7 @@ Synchronize aperture library given by PATH with flickr.
  --select|-s       regex to select *additional* keys to output
  --dry-run|-n      only output changes to flickr data
  --force|-f        overwrite already existing backups with flickr-backup
- --exif            add exif data to images
+ --exif            add exif data to images/photos
  --fix-date-upload also set the upload date to the date taken in flickr-fix
 
 =head1 AUTHOR
@@ -115,7 +115,7 @@ given ($command) {
 		open my $file, ">:encoding(UTF-8)", $path;
 		$file->print(Dump($opts));
 		$file->print(Dump(undef));
-		my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_images(extras => ''), 'Photos')));
+		my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(extras => ''), 'Photos')));
 		my (@photosets_list, %photosets_hash);
 		while (my $photo = $photos->()) {
 			my $backup = {%$photo, %{$photo->{info}}};
@@ -289,7 +289,7 @@ given ($command) {
 		$joindate->add(months => 1);
 		my $photo;
 		warn "Will only set date_posted after found join date: " . $joindate . "\n";
-		my $ickr = parallelize(flickr_add_exif(with_progressbar(flickr_images())));
+		my $ickr = parallelize(flickr_add_exif(with_progressbar(flickr_photos_list())));
 		while ($photo = $ickr->()) {
 			my %update;
 			my $exif_date_str  = $photo->{exif}{DateTimeOriginal} || $photo->{exif}{ModifyDate};
@@ -321,9 +321,9 @@ given ($command) {
 			),
 		);
 	}
-	when ("flickr-images") {
+	when ("flickr-photos") {
 		my $select = $opts->{select} // '\b\B';
-		my $gen = flickr_images();
+		my $gen = flickr_photos_list();
 		if ($opts->{exif}) {
 			$gen = parallelize(flickr_add_exif($gen));
 			$select .= '|^\.exif\.';
@@ -665,7 +665,7 @@ sub one_element {
 	return sub {my $r = $el; $el = undef; return $r;};
 }
 
-sub flickr_images {
+sub flickr_photos_list {
 	my @args = @_;
 	my ($sets, $gen);
 	if ($opts->{id}) {
@@ -725,7 +725,7 @@ sub flickr_images {
 				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', text => $opts->{title}}
 			);
 		} else {
-			warn "Using complex --title or omitting --word causes slow scan of *all* the images in the flickr account!\n" if $opts->{title};
+			warn "Using complex --title or omitting --word causes slow scan of *all* the photos in the flickr account!\n" if $opts->{title};
 			$gen = flickr_select(
 				'people.getPhotos',
 				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @args, total => $opts->{num}},
