@@ -168,6 +168,20 @@ given ($command) {
 				flickr_photos('setMeta', $old, title => $old->{title}, description => $old->{description});
 			}
 
+			my %setdates;
+			if ($old->{dates}{posted} ne $new->{dates}{posted}) {
+				$setdates{date_posted} = $old->{dates}{posted};
+			}
+			if ($old->{dates}{taken} ne $new->{dates}{taken}) {
+				$setdates{date_taken} = $old->{dates}{taken};
+			}
+			if ($old->{dates}{takengranularity} ne $new->{dates}{takengranularity}) {
+				$setdates{date_taken_granularity} = $old->{dates}{takengranularity};
+			}
+			if (%setdates) {
+				flickr_photos('setDates', $old, %setdates);
+			}
+
 			if ($old->{safety_level} != $new->{safety_level}) {
 				flickr_photos('setSafetyLevel', $old, safety_level => $old->{safety_level} + 1);
 			}
