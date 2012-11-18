@@ -42,6 +42,8 @@ Synchronize aperture library given by PATH with flickr.
 
 =cut
 
+$0 = 'apickr';
+
 use Modern::Perl;
 use autodie;
 use common::sense;
