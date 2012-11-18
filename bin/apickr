@@ -30,7 +30,7 @@ Synchronize aperture library given by PATH with flickr.
  --word|-w         only match album or title at word boundaries
  --id              only process photo/album with this id
  --verbose|-v      output verbose information
- --select|-s       regex to select *additional* keys to output
+ --select|-s       regex to select *additional* keys to output or restore
  --dry-run|-n      only output changes to flickr data
  --force|-f        overwrite already existing backups with flickr-backup
  --exif            add exif data to images/photos
@@ -165,7 +165,7 @@ given ($command) {
 			}
 
 			if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
-				flickr_photos('setMeta', $old, title => $old->{title}, description => $old->{description});
+				flickr_photos_selected('setMeta', $old, title => $old->{title}, description => $old->{description});
 			}
 
 			my %setdates;
@@ -179,37 +179,37 @@ given ($command) {
 				$setdates{date_taken_granularity} = $old->{dates}{takengranularity};
 			}
 			if (%setdates) {
-				flickr_photos('setDates', $old, %setdates);
+				flickr_photos_selected('setDates', $old, %setdates);
 			}
 
 			if ($old->{safety_level} != $new->{safety_level}) {
-				flickr_photos('setSafetyLevel', $old, safety_level => $old->{safety_level} + 1);
+				flickr_photos_selected('setSafetyLevel', $old, safety_level => $old->{safety_level} + 1);
 			}
 
 			if ($old->{license} != $new->{license}) {
-				flickr_photos('licenses.setLicense', $old, license_id => $old->{license});
+				flickr_photos_selected('licenses.setLicense', $old, license_id => $old->{license});
 			}
 
 			if ($new->{location} && !$old->{location}) {
-				flickr_photos('geo.removeLocation', $old);
+				flickr_photos_selected('geo.removeLocation', $old);
 			} else {
 				if (any {$old->{location}{$::_} ne $new->{location}{$::_}} qw/longitude latitude context accuracy/) {
-					flickr_photos('geo.setLocation', $old, lon => $old->{location}{longitude}, lat => $old->{location}{latitude}, context => $old->{location}{context}, accuracy => $old->{location}{accuracy});
+					flickr_photos_selected('geo.setLocation', $old, lon => $old->{location}{longitude}, lat => $old->{location}{latitude}, context => $old->{location}{context}, accuracy => $old->{location}{accuracy});
 				}
 				my @fields = qw(contact family friend public);
 				if (any {$old->{geoperms}{'is' . $::_} ne $new->{geoperms}{'is' . $::_}} @fields) {
-					flickr_photos('geo.setPerms', $old, map {'is_' . $_ => $old->{geoperms}{'is' . $_}} @fields);
+					flickr_photos_selected('geo.setPerms', $old, map {'is_' . $_ => $old->{geoperms}{'is' . $_}} @fields);
 				}
 			}
 
 			if (join(" ", sort keys $old->{tags}) ne join(" ", sort keys $new->{tags})) {
 				my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} values $old->{tags});
-				flickr_photos('setTags', $old, tags => $tagstring);
+				flickr_photos_selected('setTags', $old, tags => $tagstring);
 			}
 			if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
 				&& any {$old->{visibility}{$::_} ne $new->{visibility}{$::_}} qw/isfamily isfriend ispublic/,
 			) {
-				flickr_photos(
+				flickr_photos_selected(
 					'setPerms', $old,
 					map {'is_' . $_ => $old->{visibility}{'is' . $_}} qw/public friend family/,
 					map {'perm_' . $_ => $old->{permissions}{'perm' . $_}} qw/comment addmeta/,
@@ -227,38 +227,42 @@ given ($command) {
 					}
 				}
 			}
-			foreach my $score (sort {$b <=> $a} keys $allscores) {
-				foreach my $n (values $old->{notes}) {
-					my $m = first {$score_matrix->{$n->{id}}{$::_->{id}} == $score} values $new->{notes};
-					next unless $m;
-					delete $old->{notes}{$n->{id}};
-					delete $new->{notes}{$m->{id}};
-					next unless any {$n->{$::_} ne $m->{$::_}} qw/_content x y w h/;
-					flickr_photos('notes.edit', $old, note_id => $m->{id}, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
+			if (!$opts->{select} || "notes" =~ /$opts->{select}/) {
+				foreach my $score (sort {$b <=> $a} keys $allscores) {
+					foreach my $n (values $old->{notes}) {
+						my $m = first {$score_matrix->{$n->{id}}{$::_->{id}} == $score} values $new->{notes};
+						next unless $m;
+						delete $old->{notes}{$n->{id}};
+						delete $new->{notes}{$m->{id}};
+						next unless any {$n->{$::_} ne $m->{$::_}} qw/_content x y w h/;
+						flickr_photos('notes.edit', $old, note_id => $m->{id}, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
+					}
 				}
-			}
-			foreach my $n (values $old->{notes}) {
-				flickr_photos('notes.add', $old, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
-			}
-			foreach my $m (values $new->{notes}) {
-				flickr_api('photos.notes.delete', note_id => $m->{id});
+				foreach my $n (values $old->{notes}) {
+					flickr_photos('notes.add', $old, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
+				}
+				foreach my $m (values $new->{notes}) {
+					flickr_api('photos.notes.delete', note_id => $m->{id});
+				}
 			}
 
-			foreach my $p (values $old->{people}{list}) {
-				my $q = $new->{people}{list}{$p->{nsid}};
-				my %coords = map { 'person_' . $_ => $p->{$_} } qw/x y h w/;
-				if (!$q) {
-					flickr_photos('people.add', $old, 'user_id' => $p->{nsid}, %coords);
-				} elsif (all {!defined $p->{$::_}} qw/x y h w/ and any {defined $q->{$::_}} qw/x y h w/) {
-					flickr_photos('people.deleteCoords', $old, 'user_id' => $p->{nsid});
-				} elsif (any {$p->{$::_} ne $q->{$::_}} qw/x y h w/) {
-					flickr_photos('people.editCoords', $old, 'user_id' => $p->{nsid}, %coords);
+			if (!$opts->{select} || "people" =~ /$opts->{select}/) {
+				foreach my $p (values $old->{people}{list}) {
+					my $q = $new->{people}{list}{$p->{nsid}};
+					my %coords = map { 'person_' . $_ => $p->{$_} } qw/x y h w/;
+					if (!$q) {
+						flickr_photos('people.add', $old, 'user_id' => $p->{nsid}, %coords);
+					} elsif (all {!defined $p->{$::_}} qw/x y h w/ and any {defined $q->{$::_}} qw/x y h w/) {
+						flickr_photos('people.deleteCoords', $old, 'user_id' => $p->{nsid});
+					} elsif (any {$p->{$::_} ne $q->{$::_}} qw/x y h w/) {
+						flickr_photos('people.editCoords', $old, 'user_id' => $p->{nsid}, %coords);
+					}
 				}
-			}
-			if ($new->{people}{list}) {
-				foreach my $q (values $new->{people}{list}) {
-					unless ($old->{people}{list}{$q->{nsid}}) {
-						flickr_photos('people.delete', $old, 'user_id' => $q->{nsid});
+				if ($new->{people}{list}) {
+					foreach my $q (values $new->{people}{list}) {
+						unless ($old->{people}{list}{$q->{nsid}}) {
+							flickr_photos('people.delete', $old, 'user_id' => $q->{nsid});
+						}
 					}
 				}
 			}
@@ -279,16 +283,33 @@ given ($command) {
 				)
 			)
 		);
+
 		while (my $old = $photoset_backups->()) {
 			my $new = $old->{info};
+
+			my %update_photos;
+
 			my $oldorder = join(",", @{$old->{order}});
-			if ($oldorder ne join(",", @{$new->{order}})) {
-				flickr_photosets('editPhotos', $old, primary_photo_id => $old->{primary}, photo_ids => $oldorder);
-			} elsif ($old->{primary} ne $new->{primary}) {
-				flickr_photosets('setPrimaryPhoto', $old, photo_id => $old->{primary});
+			if ($oldorder ne join(",", @{$new->{order}}) && (!$opts->{select} || 'photo_ids' =~ /$opts->{select}/)) {
+				$update_photos{photo_ids} = $oldorder;
 			}
-			if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
-				flickr_photosets('editMeta', $old, title => $old->{title}, description => $old->{description});
+			if ($old->{primary} ne $new->{primary} && (!$opts->{select} || 'primary_photo_id' =~ /$opts->{select}/)) {
+				$update_photos{primary_photo_id} = $old->{primary};
+			}
+			if ($update_photos{photo_ids}) {
+				flickr_photosets('editPhotos', $old, %update_photos);
+			} elsif (%update_photos) {
+				flickr_photosets('setPrimaryPhoto', $old, photo_id => $update_photos{primary_photo_id});
+			}
+
+			my %update_meta;
+			foreach my $k (qw/title description/) {
+				if ($old->{$k} ne $new->{$k} && (!$opts->{select} || $k =~ /$opts->{select}/)) {
+					$update_meta{$k} = $old->{$k};
+				}
+			}
+			if (%update_meta) {
+				flickr_photosets('editMeta', $old, %update_meta);
 			}
 		}
 	}
@@ -414,6 +435,16 @@ sub flickr_api {
 sub flickr_photos {
 	my ($method, $photo, @args) = @_;
 	return flickr_api('photos.' . $method, photo_id => $photo->{id}, @args);
+}
+
+sub flickr_photos_selected {
+	my ($method, $photo, %args) = @_;
+	if ($opts->{select}) {
+		foreach my $key (keys %args) {
+			delete $args{$key} unless $key =~ /$opts->{select}/;
+		}
+	}
+	flickr_photos($method, $photo, %args) if %args;
 }
 
 sub flickr_photosets {
