@@ -95,12 +95,14 @@ if ($command !~ /^flickr-/) {
 }
 
 given ($command) {
+
 	when ("albums") {
 		display(aperture_select(
 			"RKFolder.name AS album,COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,COUNT(DISTINCT RKVersion.uuid) AS images",
 			"GROUP BY RKVersion.projectUuid"
 		));
 	}
+
 	when ("images") {
 		my $gen = aperture_select(
 			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RkVersion.imageDate"
@@ -127,7 +129,7 @@ given ($command) {
 			if (%{$photo->{photoset}}) {
 				my $id = $photo->{photoset}{id};
 				push @photosets_list, $id unless $photosets_hash{$id};
-				$photosets_hash{$id} ||= $photo->{photoset};
+				$photosets_hash{$id} ||= {%{$photo->{photoset}}};
 				$photosets_hash{$id}{order}[$photo->{num}-1] = $photo->{id};
 			}
 		}
@@ -358,6 +360,7 @@ given ($command) {
 			),
 		);
 	}
+
 	when ("flickr-photos") {
 		my $select = $opts->{select} // '\b\B';
 		my $gen = flickr_photos_list();
@@ -372,6 +375,7 @@ given ($command) {
 			)
 		);
 	}
+
 	default {die "Unknown command $_"}
 };
 
@@ -530,6 +534,7 @@ sub aperture_select {
 		. ($opts->{title} ? "AND RKVersion.name REGEXP ? " : '')
 		. ($opts->{id}    ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '')
 		. $add
+		. " ORDER BY RKVersion.imageDate "
 		. ($opts->{num}   ? " LIMIT ? " : '');
 	my $sth = $dbh->prepare($sql);
 	my $param = 1;
