@@ -94,6 +94,8 @@ if ($command !~ /^flickr-/) {
 	$path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
 }
 
+my @global_wait_coros;
+
 given ($command) {
 
 	when ("albums") {
@@ -379,6 +381,8 @@ given ($command) {
 	default {die "Unknown command $_"}
 };
 
+$_->join() foreach @global_wait_coros;
+
 exit;
 
 sub flickr_auth {
@@ -403,7 +407,7 @@ sub flickr_auth {
 }
 
 sub flickr_api {
-	state $api = Flickr::API2->new({key => '04c25240b84f6f5d32e8e43fd4deb249', secret => 'abef06bf4946a4a2'});
+	state $api  = Flickr::API2->new({key => '04c25240b84f6f5d32e8e43fd4deb249', secret => 'abef06bf4946a4a2'});
 	state $auth = flickr_auth($api);
 	my $method = shift;
 	my $params = {@_};
@@ -444,13 +448,20 @@ sub flickr_photos {
 }
 
 sub flickr_photos_selected {
+	state $semaphore = Coro::Semaphore->new(10);
 	my ($method, $photo, %args) = @_;
 	if ($opts->{select}) {
 		foreach my $key (keys %args) {
 			delete $args{$key} unless $key =~ /$opts->{select}/;
 		}
 	}
-	flickr_photos($method, $photo, %args) if %args;
+	if (%args) {
+		$semaphore->down();
+		push @global_wait_coros, async {
+			flickr_photos($method, $photo, %args);
+			$semaphore->up();
+		}
+	}
 }
 
 sub flickr_photosets {
