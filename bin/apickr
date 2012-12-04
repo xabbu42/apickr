@@ -107,7 +107,7 @@ given ($command) {
 
 	when ("images") {
 		my $gen = aperture_select(
-			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RkVersion.imageDate"
+			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RkVersion.imageDate,RKVersion.modelId,(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords"
 		);
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
