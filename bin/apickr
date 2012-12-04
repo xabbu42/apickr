@@ -14,7 +14,7 @@ Synchronize aperture library given by PATH with flickr.
 
   albums              list albums
   images              list images
-  flickr              sync with flickr
+  sync                sync with flickr
   flickr-fix          fix flickr dates from exif
   flickr-photosets    list flickr photosets
   flickr-photos       list flickr photos
@@ -106,15 +106,90 @@ given ($command) {
 	}
 
 	when ("images") {
-		my $gen = aperture_select(
-			"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RkVersion.imageDate,RKVersion.modelId,(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords"
-		);
+		my $gen = aperture_select();
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
 		display($gen);
 	}
-	when ("flickr") {
+
+	when ("sync") {
+		my $auth = flickr_auth();
+		my $tags = flickr_api('tags.getListUserRaw', user_id => $auth->{user}{nsid});
+		my (%rawtags, %cleantags);
+		foreach my $tag (@{$tags->{tags}}) {
+			$rawtags{$tag->{clean}} = $tag->{raw}[0];
+			$cleantags{$_} = $tag->{clean} foreach @{$tag->{raw}};
+		}
+
+		my $ap_gen   = aperture_select();
+		my $ickr_gen = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(), 'Photos')));
+
+		my $ickr = $ickr_gen->();
+		my $ap;
+
+		while ($ickr and %$ickr and ($ap = $ap_gen->())) {
+			while ($ickr and %$ickr and $ickr->{datetaken} lt $ap->{imageDate}) {
+				$ickr = $ickr_gen->();
+			}
+			if ($ickr and %$ickr and $ickr->{datetaken} eq $ap->{imageDate}) {
+				my ($changed, $stars, %tags, %keywords, %rating_tags);
+
+				$tags{$_}++     foreach split / /, $ickr->{tags};
+				$keywords{$_}++ foreach split ",", $ap->{keywords};
+
+				for ($stars = 1; $stars <= min(4, $ap->{mainRating}); $stars++) {
+					my $tag = 'aperture:rating=' . $stars . 'ormore';
+					$rating_tags{$tag}++;
+				}
+				$rating_tags{'aperture:rating=' . $ap->{mainRating}}++;
+
+				foreach my $tag (keys %keywords) {
+					if ($tag !~ /^flickr:/) {
+						my $clean = $cleantags{$tag} // $tag;
+						$changed = $changed || !$tags{$clean};
+						$tags{$clean}++;
+					}
+				}
+				$tags{$_}++ foreach keys %rating_tags;
+				foreach my $tag (keys $tags) {
+					my $raw = $rawtags{$tag} // $tag;
+					if (!$keywords{$raw} && !$rating_tags{$tag}) {
+						$changed = 1;
+						delete $tags{$tag};
+					}
+				}
+
+				if ($changed) {
+					flickr_photos_selected(
+						'setTags', $ickr,
+						tags => join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags))
+					);
+				}
+
+				my $num = 0;
+				my $perm_comment = 3; # recommended default for flickr
+				my $perm_addmeta = 2; # dito
+				foreach my $perm (qw/nobody friends_and_family contacts everybody/) {
+					$perm_comment = $num if $keywords{'flickr:comment=' . $perm};
+					$perm_addmeta = $num if $keywords{'flickr:addmeta=' . $perm};
+					$num++;
+				}
+				if ( (any {$keywords{'flickr:' . $::_} != $ickr->{'is' . $::_}} qw/family friend public/)
+					 || $perm_comment != $ickr->{info}{permissions}{permcomment}
+					 || $perm_addmeta != $ickr->{info}{permissions}{permaddmeta}
+				) {
+					flickr_photos_selected(
+						'setPerms', $ickr,
+						(map {'is_' . $_ => 0+$keywords{'flickr:' . $_}} qw/family friend public/),
+						'perm_comment' => $perm_comment,
+						'perm_addmeta' => $perm_addmeta,
+					);
+				}
+			}
+		}
+
 	}
+
 	when ("flickr-backup") {
 		my $path = shift() or die "No path for backup file given!\n";
 		die "Will not overwrite existing file $path!\n" if -e $path && !$opts->{force};
@@ -533,6 +608,7 @@ sub flickr_select {
 sub aperture_select {
 	my ($select, $add) = @_;
 	$add = "" unless $add;
+	$select = "RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RKVersion.imageDate,RKVersion.modelId,(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords" unless $select;
 	$select .= "," . $opts->{select} if $opts->{select};
 	my $dbpath = catdir($path, 'Database', 'Library.apdb');
 	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
