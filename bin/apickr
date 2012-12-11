@@ -608,12 +608,23 @@ sub flickr_select {
 sub aperture_select {
 	my ($select, $add) = @_;
 	$add = "" unless $add;
-	$select = "RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RKVersion.imageDate,RKVersion.modelId,(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords" unless $select;
+	$select =
+		"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,"
+		. "versionNumber,RKVersion.imageDate,RKVersion.modelId,"
+		. "(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords,"
+		. "(SELECT stringProperty FROM p.RKUniqueString JOIN p.RKIptcProperty ON p.RKUniqueString.modelId = p.RKIptcProperty.stringId WHERE p.RKIptcProperty.versionId = RKVersion.modelId AND p.RKIptcProperty.propertyKey = 'Caption/Abstract') as caption,"
+		. "(SELECT stringProperty FROM p.RKUniqueString JOIN p.RKIptcProperty ON p.RKUniqueString.modelId = p.RKIptcProperty.stringId WHERE p.RKIptcProperty.versionId = RKVersion.modelId AND p.RKIptcProperty.propertyKey = 'ObjectName') as title"
+		unless $select;
 	$select .= "," . $opts->{select} if $opts->{select};
 	my $dbpath = catdir($path, 'Database', 'Library.apdb');
 	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
+	{
+		local $dbh->{AutoCommit} = 1;
+		$dbh->do('ATTACH DATABASE ? AS p;', undef, catdir($path, 'Database', 'Properties.apdb'))
+			or die $dbh->errstr;
+	}
 	my $sql =
-		"Select $select FROM RKVersion"
+		"SELECT $select FROM RKVersion"
 		. " JOIN RKFolder ON RKFolder.uuid = RKVersion.projectUuid"
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
