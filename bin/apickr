@@ -132,6 +132,11 @@ given ($command) {
 				$ickr = $ickr_gen->();
 			}
 			if ($ickr and %$ickr and $ickr->{datetaken} eq $ap->{imageDate}) {
+
+				if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
+					flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
+				}
+
 				my ($changed, $stars, %tags, %keywords, %rating_tags);
 
 				$tags{$_}++     foreach split / /, $ickr->{tags};
