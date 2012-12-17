@@ -30,7 +30,8 @@ Synchronize aperture library given by PATH with flickr.
  --word|-w         only match album or title at word boundaries
  --id              only process photo/album with this id
  --verbose|-v      output verbose information
- --select|-s       regex to select *additional* keys to output or restore
+ --select|-s       regex to select *additional* keys to display
+                   or the *only* keys to write for restore/sync.
  --dry-run|-n      only output changes to flickr data
  --force|-f        overwrite already existing backups with flickr-backup
  --exif            add exif data to images/photos
@@ -99,14 +100,11 @@ my @global_wait_coros;
 given ($command) {
 
 	when ("albums") {
-		display(aperture_select(
-			"RKFolder.name AS album,COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,COUNT(DISTINCT RKVersion.uuid) AS images",
-			"GROUP BY RKVersion.projectUuid"
-		));
+		display(aperture_select_albums($opts->{select}));
 	}
 
 	when ("images") {
-		my $gen = aperture_select();
+		my $gen = aperture_select_images($opts->{select});
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
 		display($gen);
@@ -121,7 +119,7 @@ given ($command) {
 			$cleantags{$_} = $tag->{clean} foreach @{$tag->{raw}};
 		}
 
-		my $ap_gen   = aperture_select();
+		my $ap_gen   = aperture_select_images();
 		my $ickr_gen = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(), 'Photos')));
 
 		my $ickr = $ickr_gen->();
@@ -610,17 +608,31 @@ sub flickr_select {
 	}
 }
 
-sub aperture_select {
-	my ($select, $add) = @_;
-	$add = "" unless $add;
-	$select =
-		"RKVersion.uuid,RKFolder.name AS album,RKVersion.name,imagePath,mainRating,"
-		. "versionNumber,RKVersion.imageDate,RKVersion.modelId,"
+sub aperture_select_images {
+	my ($select) = @_;
+	return aperture_select(
+		"RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RKVersion.imageDate,"
 		. "(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords,"
 		. "(SELECT stringProperty FROM p.RKUniqueString JOIN p.RKIptcProperty ON p.RKUniqueString.modelId = p.RKIptcProperty.stringId WHERE p.RKIptcProperty.versionId = RKVersion.modelId AND p.RKIptcProperty.propertyKey = 'Caption/Abstract') as caption,"
 		. "(SELECT stringProperty FROM p.RKUniqueString JOIN p.RKIptcProperty ON p.RKUniqueString.modelId = p.RKIptcProperty.stringId WHERE p.RKIptcProperty.versionId = RKVersion.modelId AND p.RKIptcProperty.propertyKey = 'ObjectName') as title"
-		unless $select;
-	$select .= "," . $opts->{select} if $opts->{select};
+		. ($select ? ",$select" : ''),
+	);
+}
+
+sub aperture_select_albums {
+	my ($select) = @_;
+	return aperture_select(
+		"RKFolder.name AS album,"
+		. "COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,"
+		. "COUNT(DISTINCT RKVersion.uuid) AS images"
+		. ($select ? ",$select" : ''),
+		"GROUP BY RKVersion.projectUuid",
+	);
+}
+
+sub aperture_select {
+	my ($select, $add) = @_;
+	$add = "" unless $add;
 	my $dbpath = catdir($path, 'Database', 'Library.apdb');
 	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
 	{
