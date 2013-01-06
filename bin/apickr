@@ -119,75 +119,70 @@ given ($command) {
 			$cleantags{$_} = $tag->{clean} foreach @{$tag->{raw}};
 		}
 
+
 		my $ap_gen   = aperture_select_images();
 		my $ickr_gen = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(), 'Photos')));
+		my $match    = apickr_match($ap_gen, $ickr_gen);
+		while ((my $ap = $match->())) {
+			next unless $ap->{flickr};
+			my $ickr = $ap->{flickr};
 
-		my $ickr = $ickr_gen->();
-		my $ap;
-
-		while ($ickr and %$ickr and ($ap = $ap_gen->())) {
-			while ($ickr and %$ickr and $ickr->{datetaken} lt $ap->{imageDate}) {
-				$ickr = $ickr_gen->();
+			if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
+				flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
 			}
-			if ($ickr and %$ickr and $ickr->{datetaken} eq $ap->{imageDate}) {
 
-				if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
-					flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
+			my ($changed, $stars, %tags, %keywords, %rating_tags);
+
+			$tags{$_}++     foreach split / /, $ickr->{tags};
+			$keywords{$_}++ foreach split ",", $ap->{keywords};
+
+			for ($stars = 1; $stars <= min(4, $ap->{mainRating}); $stars++) {
+				my $tag = 'aperture:rating=' . $stars . 'ormore';
+				$rating_tags{$tag}++;
+			}
+			$rating_tags{'aperture:rating=' . $ap->{mainRating}}++;
+
+			foreach my $tag (keys %keywords) {
+				if ($tag !~ /^flickr:/) {
+					my $clean = $cleantags{$tag} // $tag;
+					$changed = $changed || !$tags{$clean};
+					$tags{$clean}++;
 				}
-
-				my ($changed, $stars, %tags, %keywords, %rating_tags);
-
-				$tags{$_}++     foreach split / /, $ickr->{tags};
-				$keywords{$_}++ foreach split ",", $ap->{keywords};
-
-				for ($stars = 1; $stars <= min(4, $ap->{mainRating}); $stars++) {
-					my $tag = 'aperture:rating=' . $stars . 'ormore';
-					$rating_tags{$tag}++;
+			}
+			$tags{$_}++ foreach keys %rating_tags;
+			foreach my $tag (keys %tags) {
+				my $raw = $rawtags{$tag} // $tag;
+				if (!$keywords{$raw} && !$rating_tags{$tag}) {
+					$changed = 1;
+					delete $tags{$tag};
 				}
-				$rating_tags{'aperture:rating=' . $ap->{mainRating}}++;
+			}
 
-				foreach my $tag (keys %keywords) {
-					if ($tag !~ /^flickr:/) {
-						my $clean = $cleantags{$tag} // $tag;
-						$changed = $changed || !$tags{$clean};
-						$tags{$clean}++;
-					}
-				}
-				$tags{$_}++ foreach keys %rating_tags;
-				foreach my $tag (keys %tags) {
-					my $raw = $rawtags{$tag} // $tag;
-					if (!$keywords{$raw} && !$rating_tags{$tag}) {
-						$changed = 1;
-						delete $tags{$tag};
-					}
-				}
-
-				if ($changed) {
-					flickr_photos_selected(
-						'setTags', $ickr,
-						tags => join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags))
+			if ($changed) {
+				flickr_photos_selected(
+					'setTags', $ickr,
+					tags => join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags))
 					);
-				}
+			}
 
-				my $num = 0;
-				my $perm_comment = 3; # recommended default for flickr
-				my $perm_addmeta = 2; # dito
-				foreach my $perm (qw/nobody friends_and_family contacts everybody/) {
-					$perm_comment = $num if $keywords{'flickr:comment=' . $perm};
-					$perm_addmeta = $num if $keywords{'flickr:addmeta=' . $perm};
-					$num++;
-				}
-				if ( (any {$keywords{'flickr:' . $::_} != $ickr->{'is' . $::_}} qw/family friend public/)
-					 || $perm_comment != $ickr->{info}{permissions}{permcomment}
-					 || $perm_addmeta != $ickr->{info}{permissions}{permaddmeta}
-				) {
-					flickr_photos_selected(
-						'setPerms', $ickr,
-						(map {'is_' . $_ => 0+$keywords{'flickr:' . $_}} qw/family friend public/),
-						'perm_comment' => $perm_comment,
-						'perm_addmeta' => $perm_addmeta,
-					);
-				}
+			my $num = 0;
+			my $perm_comment = 3; # recommended default for flickr
+			my $perm_addmeta = 2; # dito
+			foreach my $perm (qw/nobody friends_and_family contacts everybody/) {
+				$perm_comment = $num if $keywords{'flickr:comment=' . $perm};
+				$perm_addmeta = $num if $keywords{'flickr:addmeta=' . $perm};
+				$num++;
+			}
+			if ( (any {$keywords{'flickr:' . $::_} != $ickr->{'is' . $::_}} qw/family friend public/)
+			     || $perm_comment != $ickr->{info}{permissions}{permcomment}
+			     || $perm_addmeta != $ickr->{info}{permissions}{permaddmeta}
+			) {
+				flickr_photos_selected(
+					'setPerms', $ickr,
+					(map {'is_' . $_ => 0+$keywords{'flickr:' . $_}} qw/family friend public/),
+					'perm_comment' => $perm_comment,
+					'perm_addmeta' => $perm_addmeta,
+				);
 			}
 		}
 
@@ -981,6 +976,26 @@ sub flickr_add_photoset_info {
 			$photoset->{info}{primary} = $photo->{id} if $photo->{isprimary};
 		}
 		return $photoset;
+	}
+}
+
+sub apickr_match {
+	my ($ap_gen, $ickr_gen) = @_;
+
+	my $ickr = $ickr_gen->();
+	my $ap;
+
+	return sub {
+		while ($ickr and %$ickr and ($ap = $ap_gen->())) {
+			while ($ickr and %$ickr and $ickr->{datetaken} lt $ap->{imageDate}) {
+				$ickr = $ickr_gen->();
+			}
+			if ($ickr and %$ickr and $ickr->{datetaken} eq $ap->{imageDate}) {
+				$ap->{flickr} = $ickr;
+			}
+			return $ap;
+		}
+		return undef;
 	}
 }
 
