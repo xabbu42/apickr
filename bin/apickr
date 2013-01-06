@@ -648,7 +648,7 @@ sub aperture_select {
 			or die $dbh->errstr;
 	}
 	my $sql =
-		"SELECT $select FROM RKVersion"
+		"FROM RKVersion"
 		. " JOIN RKFolder ON RKFolder.uuid = RKVersion.projectUuid"
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
@@ -658,15 +658,32 @@ sub aperture_select {
 		. $add
 		. " ORDER BY RKVersion.imageDate "
 		. ($opts->{num}   ? " LIMIT ? " : '');
-	my $sth = $dbh->prepare($sql);
+	my $csth = $dbh->prepare("SELECT count(*) " . $sql);
+	my $sth = $dbh->prepare("SELECT $select " . $sql);
 	my $param = 1;
-	$sth->bind_param($param++, $opts->{album}) if $opts->{album};
-	$sth->bind_param($param++, $opts->{title}) if $opts->{title};
-	if ($opts->{id}) {
-		$sth->bind_param($param++, $opts->{id});
-		$sth->bind_param($param++, $opts->{id});
+	if ($opts->{album}) {
+		$sth->bind_param($param, $opts->{album});
+		$csth->bind_param($param++, $opts->{album});
 	}
-	$sth->bind_param($param++, $opts->{num}) if $opts->{num};
+	if ($opts->{title}) {
+		$sth->bind_param($param, $opts->{title});
+		$csth->bind_param($param++, $opts->{title});
+	}
+	if ($opts->{id}) {
+		foreach (0..1) {
+			$sth->bind_param($param, $opts->{id});
+			$csth->bind_param($param++, $opts->{id});
+		}
+	}
+	if ($opts->{num}) {
+		$sth->bind_param($param, $opts->{num});
+		$csth->bind_param($param++, $opts->{num});
+	}
+
+	$csth->execute();
+	my ($total) = @{$csth->fetchrow_arrayref};
+	my $num = 1;
+
 	$sth->execute();
 
 	return sub {
@@ -679,8 +696,14 @@ sub aperture_select {
 		if ($row && $row->{imageDate}) {
 			$row->{imageDate} = datetime_aperture($row->{imageDate});
 		}
-		$dbh->disconnect unless $row;
-		return $row;
+		if ($row) {
+			$row->{total} = $total;
+			$row->{num} = $num++;
+			return $row;
+		} else {
+			$dbh->disconnect unless $row;
+			return undef;
+		}
 	}
 }
 
