@@ -15,6 +15,7 @@ Synchronize aperture library given by PATH with flickr.
   albums              list albums
   images              list images
   sync                sync with flickr
+  match               match aperture images with flickr photos
   flickr-fix          fix flickr dates from exif
   flickr-photosets    list flickr photosets
   flickr-photos       list flickr photos
@@ -108,6 +109,17 @@ given ($command) {
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
 		display($gen);
+	}
+
+	when ("match") {
+		my $select = $opts->{select} // '\b\B';
+		my $ap_gen   = aperture_select_images();
+		my $ickr_gen = parallelize(flickr_add_photo_info(flickr_photos_list(), 'Photos'));
+		my $match    = filter_keys(
+			qr/^.\w+$|^.flickr\.(id|title|photos|count_views|count_comments)\b|$select/,
+			apickr_match($ap_gen, $ickr_gen),
+		);
+		display($match);
 	}
 
 	when ("sync") {
