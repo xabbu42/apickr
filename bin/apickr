@@ -30,6 +30,8 @@ Synchronize aperture library given by PATH with flickr.
  --title|-t=REGEX  only process Images which match REGEX
  --word|-w         only match album or title at word boundaries
  --id              only process photo/album with this id
+ --filter|-f=REGEX only display results where any key or any value match REGEX
+ --count|-c        count number of results
  --verbose|-v      output verbose information
  --select|-s       regex to select *additional* keys to display
                    or the *only* keys to write for restore/sync.
@@ -85,7 +87,7 @@ my $config = {};
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif', 'fix-date-upload',
+	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif', 'fix-date-upload', 'count|c', 'filter|f=s',
 	) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -101,25 +103,21 @@ my @global_wait_coros;
 given ($command) {
 
 	when ("albums") {
-		display(aperture_select_albums($opts->{select}));
+		display(aperture_select_albums($opts->{select}), '.');
 	}
 
 	when ("images") {
 		my $gen = aperture_select_images($opts->{select});
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
-		display($gen);
+		display($gen, '.');
 	}
 
 	when ("match") {
 		my $select = $opts->{select} // '\b\B';
 		my $ap_gen   = aperture_select_images();
 		my $ickr_gen = parallelize(flickr_add_photo_info(flickr_photos_list(), 'Photos'));
-		my $match    = filter_keys(
-			qr/^.\w+$|^.flickr\.(id|title|photos|count_views|count_comments)\b|$select/,
-			apickr_match($ap_gen, $ickr_gen),
-		);
-		display($match);
+		display(apickr_match($ap_gen, $ickr_gen));
 	}
 
 	when ("sync") {
@@ -438,12 +436,7 @@ given ($command) {
 
 	when ("flickr-photosets") {
 		my $select = $opts->{select} // '\b\B';
-		display(
-			filter_keys(
-				qr/^\.(id|title|photos|count_views|count_comments)\b|$select/,
-				flickr_photosets_list(total => $opts->{num})
-			),
-		);
+		display(flickr_photosets_list(total => $opts->{num}));
 	}
 
 	when ("flickr-photos") {
@@ -451,14 +444,8 @@ given ($command) {
 		my $gen = flickr_photos_list();
 		if ($opts->{exif}) {
 			$gen = parallelize(flickr_add_exif($gen));
-			$select .= '|^\.exif\.';
 		}
-		display(
-			filter_keys(
-				qr/^\.(title|photoset.title|datetaken|tags|views|sets)\b|$select/,
-				$gen,
-			)
-		);
+		display($gen);
 	}
 
 	default {die "Unknown command $_"}
@@ -748,35 +735,41 @@ sub datetime_flickr {
 	return $res;
 }
 
-sub _filter_keys_rec {
-	my ($prefix, $select, $data) = @_;
-	my $result;
+sub _filter_rec {
+	my ($prefix, $select, $filter, $data) = @_;
+	my ($result, $result_match) = (undef, 0);
 	given (ref $data) {
 		when ('HASH') {
 			foreach my $key (keys $data) {
-				my $val = _filter_keys_rec($prefix . "." . $key, $select, $data->{$key});
+				my ($val, $match) = _filter_rec($prefix . "." . $key, $select, $filter, $data->{$key});
+				$result_match ||= $match;
 				$result->{$key} = $val if defined $val;
 			}
 		}
 		when ('ARRAY') {
 			foreach my $val (@$data) {
-				my $new = _filter_keys_rec($prefix, $select, $val);
+				my ($new, $match) = _filter_rec($prefix, $select, $filter, $val);
+				$result_match ||= $match;
 				push $result, $new if defined $new;
 			}
 		}
 		default {
+			$result_match ||= ($data && ($prefix ~~ $filter || $data ~~ $filter));
 			$result = $prefix ~~ $select ? $data : undef;
 		}
 	}
-	return $result;
+	return ($result, $result_match);
 }
 
-sub filter_keys {
-	my ($select, $gen) = @_;
-	return $gen if ($opts->{verbose});
+sub filter {
+	my ($select, $filter, $gen) = @_;
 	return sub {
-		my $row = $gen->();
-		return $row ? _filter_keys_rec('', $select, $row) : undef;
+		my $row;
+		while ($row = $gen->()) {
+			my ($new, $match) = _filter_rec('', $select, $filter, $row);
+			return $new if $new and $match;
+		}
+		return $row;
 	}
 }
 
@@ -1045,10 +1038,28 @@ sub apickr_match {
 }
 
 sub display {
-	state $num = 0;
-	my ($gen) = @_;
-	my ($row, $n);
-	say d($row) while $row = $gen->();
+	my ($gen, $select) = @_;
+	my $regex = $opts->{select} // $select // '\b\B';
+
+	if ($opts->{verbose}) {
+		$regex = '.';
+	} elsif (!$opts->{count} || !$opts->{select}) {
+		$regex .= '|^\.('
+			. 'title|photoset.title|datetaken|tags|views|sets|exif' #photos keys
+			. '|photos|count_views|count_comments'                  #photoset keys
+			. ')\b';
+	}
+	$gen = with_progressbar($gen) if $opts->{count};
+	$gen = filter(qr/$regex/, $opts->{filter} ? qr/$opts->{filter}/ : qr/./, $gen);
+	if ($opts->{count}) {
+		my $count = 0;
+		while (my $row = $gen->()) {
+			$count++ if $row;
+		}
+		say $count;
+	} else {
+		say d($_) while $_ = $gen->();
+	}
 }
 
 sub d {
