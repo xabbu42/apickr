@@ -32,6 +32,7 @@ Synchronize aperture library given by PATH with flickr.
  --id              only process photo or photoset with this id
  --filter|-f=REGEX only display results where any key or any value match REGEX
  --count|-c        count number of results
+ --classify=FIELD  count number of results per FIELD value
  --verbose|-v      output verbose information
  --select|-s       regex to select *additional* keys to display
                    or the *only* keys to write for restore/sync.
@@ -87,8 +88,10 @@ my $config = {};
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v', 'select|s=s', 'dry-run|n', 'force|f', 'exif', 'fix-date-upload', 'count|c', 'filter|f=s',
-	) or pod2usage(-exitval => 2, @podargs);
+	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v',
+	'select|s=s', 'dry-run|n', 'force|f', 'exif', 'fix-date-upload', 'count|c',
+	'filter|f=s', 'classify=s'
+) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
 
@@ -1046,14 +1049,21 @@ sub display {
 			. '|photos|count_views|count_comments'                  #photoset keys
 			. ')\b';
 	}
-	$gen = with_progressbar($gen) if $opts->{count};
+	$gen = with_progressbar($gen) if $opts->{count} or $opts->{classify};
 	$gen = filter(qr/$regex/, $opts->{filter} ? qr/$opts->{filter}/ : qr/./, $gen);
 	if ($opts->{count}) {
 		my $count = 0;
 		while (my $row = $gen->()) {
-			$count++ if $row;
+			$count++;
 		}
 		say $count;
+	} elsif ($opts->{classify}) {
+		my %counts;
+		while (my $row = $gen->()) {
+			$counts{$row->{$opts->{classify}}}++;
+		}
+		my $maxlen = max map {length $_} keys %counts;
+		say sprintf("%-${maxlen}s :   %s", $_, $counts{$_}) foreach sort keys %counts;
 	} else {
 		say d($_) while $_ = $gen->();
 	}
