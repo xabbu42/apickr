@@ -639,12 +639,10 @@ sub aperture_select {
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
 		. ($opts->{album} ? "AND RKFolder.name REGEXP ? " : '')
 		. ($opts->{title} ? "AND RKVersion.name REGEXP ? " : '')
-		. ($opts->{id}    ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '')
-		. $add
-		. " ORDER BY RKVersion.imageDate "
-		. ($opts->{num}   ? " LIMIT ? " : '');
-	my $csth = $dbh->prepare("SELECT count(*) " . $sql);
-	my $sth = $dbh->prepare("SELECT $select " . $sql);
+		. ($opts->{id}    ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '');
+	my $count = ($add =~ /GROUP BY ([\w.]+)/) ? 'DISTINCT ' . $1 : '*';
+	my $csth = $dbh->prepare("SELECT COUNT($count) " . $sql);
+	my $sth = $dbh->prepare("SELECT $select " . $sql . $add . " ORDER BY RKVersion.imageDate " . ($opts->{num} ? " LIMIT ? " : ''));
 	my $param = 1;
 	if ($opts->{album}) {
 		$sth->bind_param($param, $opts->{album});
@@ -662,7 +660,6 @@ sub aperture_select {
 	}
 	if ($opts->{num}) {
 		$sth->bind_param($param, $opts->{num});
-		$csth->bind_param($param++, $opts->{num});
 	}
 
 	$csth->execute();
