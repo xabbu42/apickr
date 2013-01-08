@@ -26,10 +26,10 @@ Synchronize aperture library given by PATH with flickr.
 
  --help|-h         brief help message
  --num=NUM         only process NUM items
- --album|-a=REGEX  only process Aperture Albums/Flickr Photosets which match REGEX
- --title|-t=REGEX  only process Images which match REGEX
- --word|-w         only match album or title at word boundaries
- --id              only process photo/album with this id
+ --album|-a=REGEX  only process albums or photosets which match REGEX
+ --title|-t=REGEX  only process images or photos which match REGEX
+ --word|-w         only match --album or --title at word boundaries
+ --id              only process photo or photoset with this id
  --filter|-f=REGEX only display results where any key or any value match REGEX
  --count|-c        count number of results
  --verbose|-v      output verbose information
@@ -37,7 +37,7 @@ Synchronize aperture library given by PATH with flickr.
                    or the *only* keys to write for restore/sync.
  --dry-run|-n      only output changes to flickr data
  --force|-f        overwrite already existing backups with flickr-backup
- --exif            add exif data to images/photos
+ --exif            add exif data to images and photos
  --fix-date-upload also set the upload date to the date taken in flickr-fix
 
 =head1 AUTHOR
