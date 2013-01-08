@@ -133,7 +133,7 @@ given ($command) {
 
 
 		my $ap_gen   = aperture_select_images();
-		my $ickr_gen = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(), 'Photos')));
+		my $ickr_gen = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list())));
 		my $match    = apickr_match($ap_gen, $ickr_gen);
 		while ((my $ap = $match->())) {
 			next unless $ap->{flickr};
@@ -206,7 +206,7 @@ given ($command) {
 		open my $file, ">:encoding(UTF-8)", $path;
 		$file->print(Dump($opts));
 		$file->print(Dump(undef));
-		my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(extras => ''), 'Photos')));
+		my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(extras => ''))));
 		my (@photosets_list, %photosets_hash);
 		while (my $photo = $photos->()) {
 			my $backup = {%$photo, %{$photo->{info}}};
@@ -224,7 +224,6 @@ given ($command) {
 		my $photosets = parallelize(flickr_add_photoset_info(with_progressbar(
 			@photosets_list ? sub {$photosets_hash{shift @photosets_list}}
 			                : flickr_photosets_list(),
-			'Photosets',
 		)));
 		while (my $photoset = $photosets->()) {
 			my $backup = {%$photoset, %{$photoset->{info}}};
@@ -243,7 +242,7 @@ given ($command) {
 		my $photo_backups = parallelize(
 			flickr_add_photo_info(
 				flickr_filter_photos(
-					with_progressbar(sub { Load(shift $photo_backups_yaml) }, 'Photos')
+					with_progressbar(sub { Load(shift $photo_backups_yaml) })
 				)
 			)
 		);
@@ -369,8 +368,7 @@ given ($command) {
 						$res->{total} = +@$photoset_backups_yaml;
 						$res->{num} = $i;
 						return $res;
-					}),
-					'Photosets'
+					})
 				)
 			)
 		);
@@ -814,8 +812,8 @@ sub flickr_photosets_list {
 }
 
 sub with_progressbar {
-	my ($gen, $text) = @_;
-	my ($bar, $oldtitle, $wrote_newline);
+	my ($gen) = @_;
+	my ($bar, $oldtitle, $wrote_newline, $text);
 	$| = 1;
 	return sub {
 		my $val = $gen->();
@@ -825,6 +823,18 @@ sub with_progressbar {
 		}
 		if ($oldtitle && $val->{photoset}{title} ne $oldtitle or !$bar) {
 			print "\n" if $bar;
+			$text = $val->{photoset}{title} // $text;
+			if (!$text) {
+				if ($val->{path}) {
+					$text = 'Images';
+				} elsif ($val->{images}) {
+					$text = 'Albums';
+				} elsif ($val->{photos}) {
+					$text = 'Photosets';
+				} else {
+					$text = 'Photos';
+				}
+			}
 			$bar = String::ProgressBar->new(
 				max    => $val->{total},
 				length => 40,
