@@ -107,14 +107,14 @@ my @global_wait_coros;
 given ($command) {
 
 	when ("albums") {
-		display(aperture_select_albums($opts->{select}), '.');
+		display(aperture_select_albums($opts->{select}));
 	}
 
 	when ("images") {
 		my $gen = aperture_select_images($opts->{select});
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
-		display($gen, '.');
+		display($gen);
 	}
 
 	when ("match") {
@@ -1001,16 +1001,18 @@ sub apickr_match {
 }
 
 sub display {
-	my ($gen, $select) = @_;
+	my ($gen) = @_;
 
-	my $regex = $opts->{select} // $select // '\b\B';
+	my $regex = $opts->{select} // '\b\B';
 
 	if ($opts->{verbose}) {
 		$regex = '.';
 	} elsif (!$opts->{count} || !$opts->{select}) {
 		$regex .= '|^\.('
-			. 'title|photoset.title|datetaken|tags|views|sets|exif' #photos keys
-			. '|photos|count_views|count_comments'                  #photoset keys
+			. '((flickr\.)?(title|photoset.title|datetaken|tags|views|sets|exif))' #flickr photos keys
+			. '|photos|count_views|count_comments'                                 #flickr photoset keys
+			. '|imageDate|imagePath|keywords|mainRating|name|path|versionNumber'   #aperture image keys
+			. '|album|stacks|images'                                               #aperture album keys
 			. ')\b';
 	}
 
