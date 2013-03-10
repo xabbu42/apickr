@@ -118,7 +118,6 @@ given ($command) {
 	}
 
 	when ("match") {
-		my $select = $opts->{select} // '\b\B';
 		my $ap_gen   = aperture_select_images();
 		my $ickr_gen = parallelize(flickr_add_photo_info(flickr_photos_list(), 'Photos'));
 		display(apickr_match($ap_gen, $ickr_gen));
@@ -439,12 +438,10 @@ given ($command) {
 	}
 
 	when ("flickr-photosets") {
-		my $select = $opts->{select} // '\b\B';
 		display(flickr_photosets_list(total => $opts->{num}));
 	}
 
 	when ("flickr-photos") {
-		my $select = $opts->{select} // '\b\B';
 		my $gen = flickr_photos_list();
 		if ($opts->{exif}) {
 			$gen = parallelize(flickr_add_exif($gen));
