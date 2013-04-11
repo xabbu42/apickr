@@ -89,7 +89,7 @@ my $config = {};
 my $opts = {};
 GetOptions(
 	$opts,
-	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v',
+	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v+',
 	'select|s=s', 'dry-run|n', 'force|f', 'exif', 'fix-date-upload', 'count|c',
 	'filter|f=s', 'classify=s', 'not|invert',
 ) or pod2usage(-exitval => 2, @podargs);
@@ -485,7 +485,7 @@ sub flickr_api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit)/) {
+	if ($opts->{verbose} > 1 or ($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef if $opts->{'dry-run'};
 	}
