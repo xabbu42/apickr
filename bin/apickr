@@ -485,9 +485,11 @@ sub flickr_api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if ($opts->{verbose} > 1 or ($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit)/) {
+	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef if $opts->{'dry-run'};
+	} elsif  ($opts->{verbose} > 1) {
+		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 	}
 	while(1) {
 		eval {
