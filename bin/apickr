@@ -862,7 +862,8 @@ sub flickr_photos_list {
 		$gen = sub {
 			while(1) {
 				my $guard = $semaphore->guard();
-				return undef unless $set || ($set = $sets->()) && (!$opts->{num} || $num < $opts->{num});
+				return undef if $opts->{num} && $num >= $opts->{num};
+				return undef if !$set && !($set = $sets->());
 				if (!$photos) {
 					$photos = add_keys(
 						{photoset => $set},
