@@ -1034,7 +1034,7 @@ sub display {
 				foreach my $val (@$data) {
 					my ($new, $match) = $walk->($prefix, $val);
 					$result_match ||= $match;
-					push $result, $new if defined $new;
+					push @$result, $new if defined $new;
 				}
 			}
 			default {
