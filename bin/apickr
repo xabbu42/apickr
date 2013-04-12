@@ -664,23 +664,24 @@ sub aperture_select {
 	$sth->execute();
 
 	return sub {
+		return undef unless $sth;
 		my $row = $sth->fetchrow_hashref;
-		if ($row && $row->{imagePath}) {
+		if (!$row) {
+			$dbh->disconnect;
+			$sth = undef;
+			return undef;
+		}
+		if ($row->{imagePath}) {
 			my ($d,$dir,$name) = splitpath($row->{imagePath});
 			my $prev = catdir($path, 'Previews', $dir, $row->{uuid}, $row->{name} . ".jpg");
 			$row->{path} = -e $prev ? $prev : catdir($path, 'Masters', $row->{imagePath});
 		}
-		if ($row && $row->{imageDate}) {
+		if ($row->{imageDate}) {
 			$row->{imageDate} = datetime_aperture($row->{imageDate});
 		}
-		if ($row) {
-			$row->{total} = $total;
-			$row->{num} = $num++;
-			return $row;
-		} else {
-			$dbh->disconnect unless $row;
-			return undef;
-		}
+		$row->{total} = $total;
+		$row->{num} = $num++;
+		return $row;
 	}
 }
 
