@@ -41,6 +41,7 @@ Synchronize aperture library given by PATH with flickr.
  --force|-f        overwrite already existing backups with flickr-backup
  --exif            add exif data to images and photos
  --fix-date-upload also set the upload date to the date taken in flickr-fix
+ --upload          upload missing photos to flickr during sync
 
 =head1 AUTHOR
 
@@ -77,6 +78,8 @@ use File::Slurp;
 use Image::ExifTool qw/ImageInfo GetAllTags/;
 use Image::ExifTool::TagLookup qw/FindTagInfo/;
 use LWP::Simple qw/get/;
+use HTTP::Request::Common;
+use XML::LibXML::Simple qw/XMLin/;
 
 my @podargs = (-verbose => 99, -sections => [qw/NAME SYNOPSIS COMMANDS OPTIONS/]);
 my $config = {};
@@ -91,7 +94,7 @@ GetOptions(
 	$opts,
 	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v+',
 	'select|s=s', 'dry-run|n', 'force|f', 'exif', 'fix-date-upload', 'count|c',
-	'filter|f=s', 'classify=s', 'not|invert',
+	'filter|f=s', 'classify=s', 'not|invert', 'upload',
 ) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
@@ -124,78 +127,43 @@ given ($command) {
 	}
 
 	when ("sync") {
-		my $auth = flickr_auth();
-		my $tags = flickr_api('tags.getListUserRaw', user_id => $auth->{user}{nsid});
-		my (%rawtags, %cleantags);
-		foreach my $tag (@{$tags->{tags}}) {
-			$rawtags{$tag->{clean}} = $tag->{raw}[0];
-			$cleantags{$_} = $tag->{clean} foreach @{$tag->{raw}};
-		}
-
 
 		my $ap_gen   = aperture_select_images();
 		my $ickr_gen = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list())));
 		my $match    = apickr_match($ap_gen, $ickr_gen);
 		while ((my $ap = $match->())) {
-			next unless $ap->{flickr};
+			next unless $ap->{flickr} || $opts->{upload};
 			my $ickr = $ap->{flickr};
 
-			if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
-				flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
-			}
+			my $settags = apickr_tags_from_ap($ap, $ickr);
+			my $setperms = apickr_perms_from_ap($ap, $ickr);
 
-			my ($changed, $stars, %tags, %keywords, %rating_tags);
-
-			$tags{$_}++     foreach split / /, $ickr->{tags};
-			$keywords{$_}++ foreach split ",", $ap->{keywords};
-
-			for ($stars = 1; $stars <= min(4, $ap->{mainRating}); $stars++) {
-				my $tag = 'aperture:rating=' . $stars . 'ormore';
-				$rating_tags{$tag}++;
-			}
-			$rating_tags{'aperture:rating=' . $ap->{mainRating}}++;
-
-			foreach my $tag (keys %keywords) {
-				if ($tag !~ /^flickr:/) {
-					my $clean = $cleantags{$tag} // $tag;
-					$changed = $changed || !$tags{$clean};
-					$tags{$clean}++;
-				}
-			}
-			$tags{$_}++ foreach keys %rating_tags;
-			foreach my $tag (keys %tags) {
-				my $raw = $rawtags{$tag} // $tag;
-				if (!$keywords{$raw} && !$rating_tags{$tag}) {
-					$changed = 1;
-					delete $tags{$tag};
-				}
-			}
-
-			if ($changed) {
-				flickr_photos_selected(
-					'setTags', $ickr,
-					tags => join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags))
-					);
-			}
-
-			my $num = 0;
-			my $perm_comment = 3; # recommended default for flickr
-			my $perm_addmeta = 2; # dito
-			foreach my $perm (qw/nobody friends_and_family contacts everybody/) {
-				$perm_comment = $num if $keywords{'flickr:comment=' . $perm};
-				$perm_addmeta = $num if $keywords{'flickr:addmeta=' . $perm};
-				$num++;
-			}
-			if ( (any {$keywords{'flickr:' . $::_} != $ickr->{'is' . $::_}} qw/family friend public/)
-			     || $perm_comment != $ickr->{info}{permissions}{permcomment}
-			     || $perm_addmeta != $ickr->{info}{permissions}{permaddmeta}
-			) {
-				flickr_photos_selected(
-					'setPerms', $ickr,
-					(map {'is_' . $_ => 0+$keywords{'flickr:' . $_}} qw/family friend public/),
-					'perm_comment' => $perm_comment,
-					'perm_addmeta' => $perm_addmeta,
+			if (!$ap->{flickr}) {
+				my $result = flickr_api(
+					'upload',
+					title       => $ap->{name},
+					description => $ap->{caption},
+					tags        => $settags,
+					(map {$_ => $setperms->{$_}} qw/is_family is_friend is_public/),
+					photo       => $ap->{path}
 				);
+
+				#recommended defaults of flickr, TODO use actual user set defaults
+				if ($setperms->{perm_comment} != 3 || $setperms->{perm_addmeta} != 2) {
+					flickr_photos_selected('setPerms', {id => $result->photoid}, %$setperms);
+				}
+			} else {
+				if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
+					flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
+				}
+
+				if ($settags) {
+					flickr_photos_selected('setTags', $ickr, tags => $settags);
+				}
+
+				if ($setperms) {
+					flickr_photos_selected('setPerms', $ickr, %$setperms);
+				}
 			}
 		}
 
@@ -485,31 +453,55 @@ sub flickr_api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit)/) {
+	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /^upload$|\.(set|remove|delete|add|edit)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef if $opts->{'dry-run'};
 	} elsif  ($opts->{verbose} > 1) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 	}
-	while(1) {
-		eval {
-			$req = $api->execute_method('flickr.' . $method, {%$params});
+
+	if ($method eq 'upload') {
+		my $raw = $api->raw();
+		my $photo = delete $params->{photo};
+		$params = {
+			api_key        => $raw->{api_key},
+			%$params,
 		};
-		if ($@ && (!$params->{page} || $params->{page} == 1)) {
-			if ($@ =~ /HTTP status: 504/) {
-				cluck $@;
+		$params->{api_sig} = $raw->sign_args($raw->{api_secret}, $params);
+		$params->{photo}   = [$photo];
+		my $req = POST 'http://api.flickr.com/services/upload/', 'Content_Type' => 'form-data', 'Content' => $params;
+		my $response = $raw->do_request($req);
+		die("API call failed with HTTP status: " . $response->code . "\n")
+			unless $response->code == 200;
+		my $content = $response->decoded_content;
+		$content = $response->content() unless defined $content;
+		my $result = XMLin($content);
+
+		return $result if ($result->{stat} eq 'ok');
+
+		die sprintf("API call failed: \%s (\%s)\n", $result->{err}{msg}, $result->{err}{code});
+
+	} else {
+		while(1) {
+			eval {
+				$req = $api->execute_method('flickr.' . $method, {%$params});
+			};
+			if ($@ && (!$params->{page} || $params->{page} == 1)) {
+				if ($@ =~ /HTTP status: 504/) {
+					cluck $@;
+				} else {
+					confess $@;
+				}
 			} else {
-				confess $@;
+				last;
 			}
-		} else {
-			last;
-		}
-	};
-	if ($req && $req->{stat} eq 'ok') {
-		delete $req->{stat};
-		if (%$req) {
-			my ($first) = keys $req;
-			return simplify_flickr_response($req->{$first}, $params->{page} ? 0 : 1);
+		};
+		if ($req && $req->{stat} eq 'ok') {
+			delete $req->{stat};
+			if (%$req) {
+				my ($first) = keys $req;
+				return simplify_flickr_response($req->{$first}, $params->{page} ? 0 : 1);
+			}
 		}
 	}
 	return undef;
@@ -983,6 +975,84 @@ sub flickr_add_photoset_info {
 			$photoset->{info}{primary} = $photo->{id} if $photo->{isprimary};
 		}
 		return $photoset;
+	}
+}
+
+sub apickr_perms_from_ap {
+	my ($ap, $ickr) = @_;
+
+	my %keywords;
+	$keywords{$_}++ foreach split ",", $ap->{keywords};
+
+	my $num = 0;
+	my $perm_comment = 3; # recommended default for flickr
+	my $perm_addmeta = 2; # dito
+	foreach my $perm (qw/nobody friends_and_family contacts everybody/) {
+		$perm_comment = $num if $keywords{'flickr:comment=' . $perm};
+		$perm_addmeta = $num if $keywords{'flickr:addmeta=' . $perm};
+		$num++;
+	}
+	if ( (any {$keywords{'flickr:' . $::_} != $ickr->{'is' . $::_}} qw/family friend public/)
+		 || $perm_comment != $ickr->{info}{permissions}{permcomment}
+		 || $perm_addmeta != $ickr->{info}{permissions}{permaddmeta}
+		) {
+		return {
+			(map {'is_' . $_ => 0+$keywords{'flickr:' . $_}} qw/family friend public/),
+			'perm_comment' => $perm_comment,
+			'perm_addmeta' => $perm_addmeta,
+		}
+	} else {
+		return undef;
+	}
+}
+
+sub apickr_tags_from_ap {
+	my ($ap, $ickr) = @_;
+
+	state ($gottags, %rawtags, %cleantags);
+	if (!$gottags) {
+		my $auth = flickr_auth();
+		my $tags = flickr_api('tags.getListUserRaw', user_id => $auth->{user}{nsid});
+		my (%rawtags, %cleantags);
+		foreach my $tag (@{$tags->{tags}}) {
+			$rawtags{$tag->{clean}} = $tag->{raw}[0];
+			$cleantags{$_} = $tag->{clean} foreach @{$tag->{raw}};
+		}
+		$gottags = 1;
+	}
+
+	my ($changed, $stars, %tags, %keywords, %rating_tags);
+
+	$keywords{$_}++ foreach split ",", $ap->{keywords};
+	$tags{$_}++     foreach split / /, $ickr->{tags};
+
+	for ($stars = 1; $stars <= min(4, $ap->{mainRating}); $stars++) {
+		my $tag = 'aperture:rating=' . $stars . 'ormore';
+		$rating_tags{$tag}++;
+	}
+	$rating_tags{'aperture:rating=' . $ap->{mainRating}}++;
+
+	foreach my $tag (keys %keywords) {
+		if ($tag !~ /^flickr:/) {
+			my $clean = $cleantags{$tag} // $tag;
+			$changed = $changed || !$tags{$clean};
+			$tags{$clean}++;
+		}
+	}
+	$tags{$_}++ foreach keys %rating_tags;
+
+	foreach my $tag (keys %tags) {
+		my $raw = $rawtags{$tag} // $tag;
+		if (!$keywords{$raw} && !$rating_tags{$tag}) {
+			$changed = 1;
+			delete $tags{$tag};
+		}
+	}
+
+	if ($changed) {
+		return join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags));
+	} else {
+		return undef;
 	}
 }
 
