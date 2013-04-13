@@ -122,8 +122,8 @@ given ($command) {
 
 	when ("match") {
 		my $ap_gen   = aperture_select_images();
-		my $ickr_gen = parallelize(flickr_add_photo_info(flickr_photos_list(), 'Photos'));
-		display(apickr_match($ap_gen, $ickr_gen));
+		my $ickr_gen = parallelize(flickr_photos_list(ignore_missing => 1), 'Photos');
+		display(flickr_add_photo_info(apickr_match($ap_gen, $ickr_gen)));
 	}
 
 	when ("sync") {
@@ -952,13 +952,15 @@ sub flickr_add_exif {
 sub flickr_add_photo_info {
 	my ($gen) = @_;
 	return sub {
-		my $photo = $gen->();
-		return undef unless $photo;
+		my $rec = $gen->();
+		return undef unless $rec;
+		my $photo = $rec->{flickr} || $rec;
+		return $rec unless $photo->{datetaken};
 		$photo->{info} = flickr_photos('getInfo', $photo);
 		$photo->{info}{people}{list} = $photo->{people}{haspeople}
 		                               ? ${flickr_photos('people.getList', $photo)}{person}
 		                               : {};
-		return $photo;
+		return $rec;
 	}
 }
 
