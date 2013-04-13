@@ -110,11 +110,11 @@ my @global_wait_coros;
 given ($command) {
 
 	when ("albums") {
-		display(aperture_select_albums($opts->{select} ? 'RKVersion.uuid AS id,*' : ''));
+		display(aperture_select_albums());
 	}
 
 	when ("images") {
-		my $gen = aperture_select_images($opts->{select} ? 'RKVersion.uuid AS id,*' : '');
+		my $gen = aperture_select_images();
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
 		display($gen);
@@ -596,23 +596,21 @@ sub flickr_select {
 }
 
 sub aperture_select_images {
-	my ($select) = @_;
 	return aperture_select(
-		"RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RKVersion.imageDate,"
+		($opts->{select} ? 'RKVersion.uuid AS id,*,' : '')
+		. "RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RKVersion.imageDate,"
 		. "(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords,"
 		. "(SELECT stringProperty FROM p.RKUniqueString JOIN p.RKIptcProperty ON p.RKUniqueString.modelId = p.RKIptcProperty.stringId WHERE p.RKIptcProperty.versionId = RKVersion.modelId AND p.RKIptcProperty.propertyKey = 'Caption/Abstract') as caption,"
 		. "(SELECT stringProperty FROM p.RKUniqueString JOIN p.RKIptcProperty ON p.RKUniqueString.modelId = p.RKIptcProperty.stringId WHERE p.RKIptcProperty.versionId = RKVersion.modelId AND p.RKIptcProperty.propertyKey = 'ObjectName') as title"
-		. ($select ? ",$select" : ''),
 	);
 }
 
 sub aperture_select_albums {
-	my ($select) = @_;
 	return aperture_select(
-		"RKFolder.name AS album,"
+		($opts->{select} ? 'RKVersion.uuid AS id,*,' : '')
+		. "RKFolder.name AS album,"
 		. "COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,"
-		. "COUNT(DISTINCT RKVersion.uuid) AS images"
-		. ($select ? ",$select" : ''),
+		. "COUNT(DISTINCT RKVersion.uuid) AS images",
 		"GROUP BY RKVersion.projectUuid",
 	);
 }
