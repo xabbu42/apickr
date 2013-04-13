@@ -110,11 +110,11 @@ my @global_wait_coros;
 given ($command) {
 
 	when ("albums") {
-		display(aperture_select_albums($opts->{select} ? '*' : ''));
+		display(aperture_select_albums($opts->{select} ? 'RKVersion.uuid AS id,*' : ''));
 	}
 
 	when ("images") {
-		my $gen = aperture_select_images($opts->{select} ? '*' : '');
+		my $gen = aperture_select_images($opts->{select} ? 'RKVersion.uuid AS id,*' : '');
 		$gen = aperture_add_exif($gen)
 			if $opts->{exif};
 		display($gen);
