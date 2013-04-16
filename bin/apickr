@@ -127,7 +127,7 @@ given ($command) {
 
 	when ("match") {
 		my $ap_gen   = aperture_select_images();
-		my $ickr_gen = parallelize(flickr_photos_list(), 'Photos');
+		my $ickr_gen = parallelize(flickr_photos_list());
 		display(flickr_add_photo_info(apickr_match($ap_gen, $ickr_gen)));
 	}
 
@@ -801,7 +801,7 @@ sub with_progressbar {
 }
 
 sub parallelize {
-	my ($gen, $step) = @_;
+	my ($gen) = @_;
 	my $channel = Coro::Channel->new();
 	my $active_coros = 10;
 	foreach my $i (0..($active_coros-1)) {
