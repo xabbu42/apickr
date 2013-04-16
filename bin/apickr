@@ -132,46 +132,10 @@ given ($command) {
 	}
 
 	when ("sync") {
-
 		my $ap_gen   = aperture_select_images();
-		my $ickr_gen = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list())));
-		my $match    = apickr_match($ap_gen, $ickr_gen);
-		while ((my $ap = $match->())) {
-			next unless $ap->{flickr} || $opts->{upload};
-			my $ickr = $ap->{flickr};
-
-			my $settags = apickr_tags_from_ap($ap, $ickr);
-			my $setperms = apickr_perms_from_ap($ap, $ickr);
-
-			if (!$ap->{flickr}) {
-				my $result = flickr_api(
-					'upload',
-					title       => $ap->{name},
-					description => $ap->{caption},
-					tags        => $settags,
-					(map {$_ => $setperms->{$_}} qw/is_family is_friend is_public/),
-					photo       => $ap->{path}
-				);
-
-				#recommended defaults of flickr, TODO use actual user set defaults
-				if ($setperms->{perm_comment} != 3 || $setperms->{perm_addmeta} != 2) {
-					flickr_photos_selected('setPerms', {id => $result->photoid}, %$setperms);
-				}
-			} else {
-				if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
-					flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
-				}
-
-				if ($settags) {
-					flickr_photos_selected('setTags', $ickr, tags => $settags);
-				}
-
-				if ($setperms) {
-					flickr_photos_selected('setPerms', $ickr, %$setperms);
-				}
-			}
-		}
-
+		my $ickr_gen = parallelize(with_progressbar(flickr_photos_list(), 'Photos'));
+		my $sync     = apickr_sync($ap_gen, $ickr_gen);
+		while ($sync->()) {};
 	}
 
 	when ("flickr-backup") {
@@ -458,14 +422,14 @@ sub flickr_api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /^upload$|\.(set|remove|delete|add|edit)/) {
+	if (($opts->{verbose} || $opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit|upload)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef if $opts->{'dry-run'};
 	} elsif  ($opts->{verbose} > 1) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 	}
 
-	if ($method eq 'upload') {
+	if ($method eq 'photos.upload') {
 		my $raw = $api->raw();
 		my $photo = delete $params->{photo};
 		$params = {
@@ -513,13 +477,15 @@ sub flickr_api {
 }
 
 sub flickr_photos {
-	my ($method, $photo, @args) = @_;
-	return flickr_api('photos.' . $method, photo_id => $photo->{id}, @args);
+	my ($method, $photo, %args) = @_;
+	$args{photo_id} = $photo->{id} if $photo->{id};
+	return flickr_api('photos.' . $method, %args);
 }
 
 sub flickr_photos_selected {
 	state $semaphore = Coro::Semaphore->new(10);
 	my ($method, $photo, %args) = @_;
+	my $callback = delete $args{callback};
 	if ($opts->{select}) {
 		foreach my $key (keys %args) {
 			delete $args{$key} unless $key =~ /$opts->{select}/;
@@ -528,7 +494,8 @@ sub flickr_photos_selected {
 	if (%args) {
 		$semaphore->down();
 		push @global_wait_coros, async {
-			flickr_photos($method, $photo, %args);
+			my $res = flickr_photos($method, $photo, %args);
+			$callback->($res) if $callback;
 			$semaphore->up();
 		}
 	}
@@ -1074,10 +1041,62 @@ sub apickr_match {
 			}
 			if ($ickr and %$ickr and $ickr->{datetaken} eq $ap->{imageDate}) {
 				$ap->{flickr} = $ickr;
+				$ap->{total} = $ap->{num} = 1 if $opts->{ickr_id};
 			}
-			return $ap;
+			return $ap unless $opts->{ickr_id} && !$ap->{flickr};
 		}
 		return undef;
+	}
+}
+
+sub apickr_sync {
+	my ($ap_gen, $ickr_gen) = @_;
+	my $match    = apickr_match($ap_gen, $ickr_gen);
+
+	return sub {
+		my $ap;
+		do {
+			$ap = $match->();
+		} while $ap && !$ap->{flickr} && !$opts->{upload};
+		return undef unless $ap;
+		my $ickr = $ap->{flickr};
+
+		my $settags = apickr_tags_from_ap($ap, $ickr);
+		my $setperms = apickr_perms_from_ap($ap, $ickr);
+
+		if (!$ap->{flickr}) {
+			flickr_photos_selected(
+				'upload',
+				{},
+				title       => $ap->{name},
+				description => $ap->{caption},
+				tags        => $settags,
+				(map {$_ => $setperms->{$_}} qw/is_family is_friend is_public/),
+				photo       => $ap->{path},
+				callback    => sub {
+					my $result = shift;
+					#recommended defaults of flickr, TODO use actual user set defaults
+					if ($setperms->{perm_comment} != 3 || $setperms->{perm_addmeta} != 2) {
+						flickr_photos_selected('setPerms', {id => $result->photoid}, %$setperms);
+					}
+				}
+			);
+
+		} else {
+			if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
+				flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
+			}
+
+			if ($settags) {
+				flickr_photos_selected('setTags', $ickr, tags => $settags);
+			}
+
+			if ($setperms) {
+				flickr_photos_selected('setPerms', $ickr, %$setperms);
+			}
+		}
+
+		return $ap;
 	}
 }
 
