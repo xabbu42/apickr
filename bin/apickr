@@ -942,9 +942,9 @@ sub flickr_add_photo_info {
 		my $rec = $gen->();
 		return undef unless $rec;
 		my $photo = $rec->{flickr} || $rec;
-		return $rec unless $photo->{datetaken};
+		return $rec unless $photo->{server};
 		$photo->{info} = flickr_photos('getInfo', $photo);
-		$photo->{info}{people}{list} = $photo->{people}{haspeople}
+		$photo->{info}{people}{list} = $photo->{info}{people}{haspeople}
 		                               ? ${flickr_photos('people.getList', $photo)}{person}
 		                               : {};
 		return $rec;
