@@ -40,7 +40,8 @@ Synchronize aperture library given by PATH with flickr.
  --dry-run|-n      only output changes to flickr data
  --force|-f        overwrite already existing backups with flickr-backup
  --exif            add exif data to images and photos
- --contexts        add contexts (photosets...) to flickr photo info
+ --contexts        add contexts (photosets...) to flickr photos
+ --info            add additional info to flickr photos
  --fix-date-upload also set the upload date to the date taken in flickr-fix
  --upload          upload missing photos to flickr during sync
 
@@ -94,7 +95,7 @@ my $opts = {};
 GetOptions(
 	$opts,
 	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v+',
-	'select|s=s', 'dry-run|n', 'force|f', 'exif', 'contexts', 'fix-date-upload', 'count|c',
+	'select|s=s', 'dry-run|n', 'force|f', 'exif', 'contexts', 'info', 'fix-date-upload', 'count|c',
 	'filter|f=s', 'classify=s', 'not|invert', 'upload',
 ) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
@@ -381,9 +382,10 @@ given ($command) {
 
 	when ("flickr-photos") {
 		my $gen = flickr_photos_list();
-		if ($opts->{exif} || $opts->{contexts}) {
-			$gen = flickr_add_contexts($gen) if $opts->{contexts};
-			$gen = flickr_add_exif($gen)     if $opts->{exif};
+		if ($opts->{exif} || $opts->{contexts} || $opts->{info}) {
+			$gen = flickr_add_contexts($gen)   if $opts->{contexts};
+			$gen = flickr_add_photo_info($gen) if $opts->{info};
+			$gen = flickr_add_exif($gen)       if $opts->{exif};
 			$gen = parallelize($gen);
 		}
 		display($gen);
@@ -1123,7 +1125,7 @@ sub display {
 		$regex = '.';
 	} elsif (!$opts->{count} || !$opts->{select}) {
 		$regex .= '|^\.('
-			. '((flickr\.)?(title|photoset.title|contexts.title|datetaken|tags|views|sets|exif))' #flickr photos keys
+			. '((flickr\.)?(title|photoset\.title|contexts\.title|info\.people\.list\.(.*)\.username|datetaken|tags|views|sets|exif))' #flickr photos keys
 			. '|photos|count_views|count_comments'                                 #flickr photoset keys
 			. '|imageDate|imagePath|keywords|mainRating|name|path|versionNumber'   #aperture image keys
 			. '|album|stacks|images'                                               #aperture album keys
