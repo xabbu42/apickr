@@ -141,239 +141,15 @@ given ($command) {
 	}
 
 	when ("flickr-backup") {
-		my $path = shift() or die "No path for backup file given!\n";
-		die "Will not overwrite existing file $path!\n" if -e $path && !$opts->{force};
-		open my $file, ">:encoding(UTF-8)", $path;
-		$file->print(Dump($opts));
-		$file->print(Dump(undef));
-		my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(extras => ''))));
-		my (@photosets_list, %photosets_hash);
-		while (my $photo = $photos->()) {
-			my $backup = {%$photo, %{$photo->{info}}};
-			delete $backup->{info};
-			$backup->{people}{list} = $photo->{info}{people}{list};
-			$file->print(Dump($backup));
-			if (%{$photo->{photoset}}) {
-				my $id = $photo->{photoset}{id};
-				push @photosets_list, $id unless $photosets_hash{$id};
-				$photosets_hash{$id} ||= {%{$photo->{photoset}}};
-				$photosets_hash{$id}{order}[$photo->{num}-1] = $photo->{id};
-			}
-		}
-		$file->print(Dump(undef));
-		my $photosets = parallelize(flickr_add_photoset_info(with_progressbar(
-			@photosets_list ? sub {$photosets_hash{shift @photosets_list}}
-			                : flickr_photosets_list(),
-		)));
-		while (my $photoset = $photosets->()) {
-			my $backup = {%$photoset, %{$photoset->{info}}};
-			delete $photoset->{info};
-			$file->print(Dump($backup));
-		}
-		$file->close();
+		flickr_backup(@ARGV);
 	}
 
 	when ("flickr-restore") {
-		my %byid;
-		my $path = shift() or die "No path for backup file given!\n";
-		my ($opts_yaml, $photo_backups_yaml, $photoset_backups_yaml) =
-			map {my @res = split "---", $_; shift @res; \@res;} split("--- ~", decode_utf8(read_file($path)));
-		$opts = {%$opts, %{Load($opts_yaml->[0])}};
-		my $photo_backups = parallelize(
-			flickr_add_photo_info(
-				flickr_filter_photos(
-					with_progressbar(sub { Load(shift $photo_backups_yaml) })
-				)
-			)
-		);
-		while (my $old = $photo_backups->()) {
-			my $new = $old->{info};
-
-			if (!$new) {
-				warn "Photo with id $old->{id} not found\n";
-				continue;
-			}
-
-			if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
-				flickr_photos_selected('setMeta', $old, title => $old->{title}, description => $old->{description});
-			}
-
-			my %setdates;
-			if ($old->{dates}{posted} ne $new->{dates}{posted}) {
-				$setdates{date_posted} = $old->{dates}{posted};
-			}
-			if ($old->{dates}{taken} ne $new->{dates}{taken}) {
-				$setdates{date_taken} = $old->{dates}{taken};
-			}
-			if ($old->{dates}{takengranularity} ne $new->{dates}{takengranularity}) {
-				$setdates{date_taken_granularity} = $old->{dates}{takengranularity};
-			}
-			if (%setdates) {
-				flickr_photos_selected('setDates', $old, %setdates);
-			}
-
-			if ($old->{safety_level} != $new->{safety_level}) {
-				flickr_photos_selected('setSafetyLevel', $old, safety_level => $old->{safety_level} + 1);
-			}
-
-			if ($old->{license} != $new->{license}) {
-				flickr_photos_selected('licenses.setLicense', $old, license_id => $old->{license});
-			}
-
-			if ($new->{location} && !$old->{location}) {
-				flickr_photos_selected('geo.removeLocation', $old);
-			} else {
-				if (any {$old->{location}{$::_} ne $new->{location}{$::_}} qw/longitude latitude context accuracy/) {
-					flickr_photos_selected('geo.setLocation', $old, lon => $old->{location}{longitude}, lat => $old->{location}{latitude}, context => $old->{location}{context}, accuracy => $old->{location}{accuracy});
-				}
-				my @fields = qw(contact family friend public);
-				if (any {$old->{geoperms}{'is' . $::_} ne $new->{geoperms}{'is' . $::_}} @fields) {
-					flickr_photos_selected('geo.setPerms', $old, map {'is_' . $_ => $old->{geoperms}{'is' . $_}} @fields);
-				}
-			}
-
-			if (join(" ", sort keys $old->{tags}) ne join(" ", sort keys $new->{tags})) {
-				my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} values $old->{tags});
-				flickr_photos_selected('setTags', $old, tags => $tagstring);
-			}
-			if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
-				&& any {$old->{visibility}{$::_} ne $new->{visibility}{$::_}} qw/isfamily isfriend ispublic/,
-			) {
-				flickr_photos_selected(
-					'setPerms', $old,
-					map {'is_' . $_ => $old->{visibility}{'is' . $_}} qw/public friend family/,
-					map {'perm_' . $_ => $old->{permissions}{'perm' . $_}} qw/comment addmeta/,
-				);
-			}
-
-			my ($score_matrix, $allscores) = ({}, {});
-			my %weight = (id => 100, content => 3, x => 2, y => 2, w => 1, h => 1);
-			foreach my $n (values $old->{notes}) {
-				foreach my $m (values $new->{notes}) {
-					my $score = sum(map {$weight{$_}} grep {$n->{$_} eq $m->{$_}} qw/id x y h w _content/);
-					if ($score > 0) {
-						$score_matrix->{$n->{id}}{$m->{id}} = $score;
-						$allscores->{$score}++;
-					}
-				}
-			}
-			if (!$opts->{select} || "notes" =~ /$opts->{select}/) {
-				foreach my $score (sort {$b <=> $a} keys $allscores) {
-					foreach my $n (values $old->{notes}) {
-						my $m = first {$score_matrix->{$n->{id}}{$::_->{id}} == $score} values $new->{notes};
-						next unless $m;
-						delete $old->{notes}{$n->{id}};
-						delete $new->{notes}{$m->{id}};
-						next unless any {$n->{$::_} ne $m->{$::_}} qw/_content x y w h/;
-						flickr_photos('notes.edit', $old, note_id => $m->{id}, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
-					}
-				}
-				foreach my $n (values $old->{notes}) {
-					flickr_photos('notes.add', $old, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
-				}
-				foreach my $m (values $new->{notes}) {
-					flickr_api('photos.notes.delete', note_id => $m->{id});
-				}
-			}
-
-			if (!$opts->{select} || "people" =~ /$opts->{select}/) {
-				foreach my $p (values $old->{people}{list}) {
-					my $q = $new->{people}{list}{$p->{nsid}};
-					my %coords = map { 'person_' . $_ => $p->{$_} } qw/x y h w/;
-					if (!$q) {
-						flickr_photos('people.add', $old, 'user_id' => $p->{nsid}, %coords);
-					} elsif (all {!defined $p->{$::_}} qw/x y h w/ and any {defined $q->{$::_}} qw/x y h w/) {
-						flickr_photos('people.deleteCoords', $old, 'user_id' => $p->{nsid});
-					} elsif (any {$p->{$::_} ne $q->{$::_}} qw/x y h w/) {
-						flickr_photos('people.editCoords', $old, 'user_id' => $p->{nsid}, %coords);
-					}
-				}
-				if ($new->{people}{list}) {
-					foreach my $q (values $new->{people}{list}) {
-						unless ($old->{people}{list}{$q->{nsid}}) {
-							flickr_photos('people.delete', $old, 'user_id' => $q->{nsid});
-						}
-					}
-				}
-			}
-		}
-
-		my $photoset_backups = parallelize(
-			flickr_add_photoset_info(
-				with_progressbar(
-					flickr_filter_photosets( sub {
-						state $i = 0;
-						my $res = Load($photoset_backups_yaml->[$i++]);
-						return undef unless $res;
-						$res->{total} = +@$photoset_backups_yaml;
-						$res->{num} = $i;
-						return $res;
-					})
-				)
-			)
-		);
-
-		while (my $old = $photoset_backups->()) {
-			my $new = $old->{info};
-
-			my %update_photos;
-
-			my $oldorder = join(",", @{$old->{order}});
-			if ($oldorder ne join(",", @{$new->{order}}) && (!$opts->{select} || 'photo_ids' =~ /$opts->{select}/)) {
-				$update_photos{photo_ids} = $oldorder;
-			}
-			if ($old->{primary} ne $new->{primary} && (!$opts->{select} || 'primary_photo_id' =~ /$opts->{select}/)) {
-				$update_photos{primary_photo_id} = $old->{primary};
-			}
-			if ($update_photos{photo_ids}) {
-				flickr_photosets('editPhotos', $old, %update_photos);
-			} elsif (%update_photos) {
-				flickr_photosets('setPrimaryPhoto', $old, photo_id => $update_photos{primary_photo_id});
-			}
-
-			my %update_meta;
-			foreach my $k (qw/title description/) {
-				if ($old->{$k} ne $new->{$k} && (!$opts->{select} || $k =~ /$opts->{select}/)) {
-					$update_meta{$k} = $old->{$k};
-				}
-			}
-			if (%update_meta) {
-				flickr_photosets('editMeta', $old, %update_meta);
-			}
-		}
+		flickr_restore(@ARGV);
 	}
 
 	when ("flickr-fix") {
-		my $auth = flickr_auth();
-		my $me = flickr_api('people.getInfo', user_id => $auth->{user}{nsid});
-		my $profile_html = get($me->{profileurl});
-		$profile_html =~ m{<dt>Joined:</dt>\n\s*<dd>(.*?)</dd>}
-			or die "Could not get joined date!\n";
-		my $joindate = DateTime::Format::Flexible->parse_datetime($1);
-		$joindate->add(months => 1);
-		my $photo;
-		warn "Will only set date_posted after found join date: " . $joindate . "\n";
-		my $ickr = parallelize(flickr_add_exif(with_progressbar(flickr_photos_list())));
-		while ($photo = $ickr->()) {
-			my %update;
-			my $exif_date_str  = $photo->{exif}{DateTimeOriginal} || $photo->{exif}{ModifyDate};
-			my $exif_date      = datetime_exif($exif_date_str) if $exif_date_str;
-			next unless $exif_date;
-			my $datetaken  = datetime_flickr($photo->{datetaken});
-			my $dateupload = datetime_flickr($photo->{dateupload});
-			if (abs(($exif_date - $datetaken)->in_units('seconds')) > 1) {
-				$update{date_taken} = "" . $exif_date;
-			}
-			if ($opts->{'fix-date-upload'}) {
-				my $correct_dateupload = $update{date_taken} ? $exif_date->epoch : $datetaken->epoch;
-				$correct_dateupload = max($joindate->epoch(), $correct_dateupload);
-				if ($dateupload->epoch != $correct_dateupload) {
-					$update{date_posted} = $correct_dateupload;
-				}
-			}
-			flickr_photos('setDates', $photo, %update)
-				if (%update);
-		}
+		flickr_fix();
 	}
 
 	when ("flickr-photosets") {
@@ -963,6 +739,251 @@ sub flickr_add_photoset_info {
 			$photoset->{info}{primary} = $photo->{id} if $photo->{isprimary};
 		}
 		return $photoset;
+	}
+}
+
+sub flickr_fix {
+	my $auth = flickr_auth();
+	my $me = flickr_api('people.getInfo', user_id => $auth->{user}{nsid});
+	my $profile_html = get($me->{profileurl});
+	$profile_html =~ m{<dt>Joined:</dt>\n\s*<dd>(.*?)</dd>}
+		or die "Could not get joined date!\n";
+	my $joindate = DateTime::Format::Flexible->parse_datetime($1);
+	$joindate->add(months => 1);
+	my $photo;
+	warn "Will only set date_posted after found join date: " . $joindate . "\n";
+	my $ickr = parallelize(flickr_add_exif(with_progressbar(flickr_photos_list())));
+	while ($photo = $ickr->()) {
+		my %update;
+		my $exif_date_str  = $photo->{exif}{DateTimeOriginal} || $photo->{exif}{ModifyDate};
+		my $exif_date      = datetime_exif($exif_date_str) if $exif_date_str;
+		next unless $exif_date;
+		my $datetaken  = datetime_flickr($photo->{datetaken});
+		my $dateupload = datetime_flickr($photo->{dateupload});
+		if (abs(($exif_date - $datetaken)->in_units('seconds')) > 1) {
+			$update{date_taken} = "" . $exif_date;
+		}
+		if ($opts->{'fix-date-upload'}) {
+			my $correct_dateupload = $update{date_taken} ? $exif_date->epoch : $datetaken->epoch;
+			$correct_dateupload = max($joindate->epoch(), $correct_dateupload);
+			if ($dateupload->epoch != $correct_dateupload) {
+				$update{date_posted} = $correct_dateupload;
+			}
+		}
+		flickr_photos('setDates', $photo, %update)
+			if (%update);
+	}
+}
+
+sub flickr_backup {
+	my $path = shift() or die "No path for backup file given!\n";
+	my $file;
+	if ($path eq "-") {
+		open $file, '>&:encoding(utf-8)', 'STDOUT';
+	} else {
+		die "Will not overwrite existing file $path!\n" if -e $path && !$opts->{force};
+		open $file, ">:encoding(UTF-8)", $path;
+	}
+
+	$file->print(Dump($opts));
+	$file->print(Dump(undef));
+
+	my $photos = parallelize(flickr_add_photo_info(with_progressbar(flickr_photos_list(extras => ''))));
+	my (@photosets_list, %photosets_hash);
+	while (my $photo = $photos->()) {
+		my $backup = {%$photo, %{$photo->{info}}};
+		delete $backup->{info};
+		$file->print(Dump($backup));
+		if (%{$photo->{photoset}}) {
+			my $id = $photo->{photoset}{id};
+			push @photosets_list, $id unless $photosets_hash{$id};
+			$photosets_hash{$id} ||= {%{$photo->{photoset}}};
+			$photosets_hash{$id}{order}[$photo->{num}-1] = $photo->{id};
+		}
+	}
+	$file->print(Dump(undef));
+
+	my $photosets = parallelize(flickr_add_photoset_info(with_progressbar(
+		@photosets_list ? sub {$photosets_hash{shift @photosets_list}}
+		                : flickr_photosets_list(),
+	)));
+	while (my $photoset = $photosets->()) {
+		my $backup = {%$photoset, %{$photoset->{info}}};
+		delete $photoset->{info};
+		$file->print(Dump($backup));
+	}
+	$file->close();
+}
+
+sub flickr_restore {
+	my %byid;
+	my $path = shift() or die "No path for backup file given!\n";
+	my ($opts_yaml, $photo_backups_yaml, $photoset_backups_yaml) =
+		map {my @res = split "---", $_; shift @res; \@res;} split("--- ~", decode_utf8(read_file($path)));
+	$opts = {%$opts, %{Load($opts_yaml->[0])}};
+
+	my $photo_backups = parallelize(
+		flickr_add_photo_info(
+			flickr_filter_photos(
+				with_progressbar(sub { Load(shift $photo_backups_yaml) })
+			)
+		)
+	);
+
+	while (my $old = $photo_backups->()) {
+		my $new = $old->{info};
+
+		if (!$new) {
+			warn "Photo with id $old->{id} not found\n";
+			continue;
+		}
+
+		if ($old->{title} ne $new->{title} || $old->{description} ne $new->{description}) {
+			flickr_photos_selected('setMeta', $old, title => $old->{title}, description => $old->{description});
+		}
+
+		my %setdates;
+		if ($old->{dates}{posted} ne $new->{dates}{posted}) {
+			$setdates{date_posted} = $old->{dates}{posted};
+		}
+		if ($old->{dates}{taken} ne $new->{dates}{taken}) {
+			$setdates{date_taken} = $old->{dates}{taken};
+		}
+		if ($old->{dates}{takengranularity} ne $new->{dates}{takengranularity}) {
+			$setdates{date_taken_granularity} = $old->{dates}{takengranularity};
+		}
+		if (%setdates) {
+			flickr_photos_selected('setDates', $old, %setdates);
+		}
+
+		if ($old->{safety_level} != $new->{safety_level}) {
+			flickr_photos_selected('setSafetyLevel', $old, safety_level => $old->{safety_level} + 1);
+		}
+
+		if ($old->{license} != $new->{license}) {
+			flickr_photos_selected('licenses.setLicense', $old, license_id => $old->{license});
+		}
+
+		if ($new->{location} && !$old->{location}) {
+			flickr_photos_selected('geo.removeLocation', $old);
+		} else {
+			if (any {$old->{location}{$::_} ne $new->{location}{$::_}} qw/longitude latitude context accuracy/) {
+				flickr_photos_selected('geo.setLocation', $old, lon => $old->{location}{longitude}, lat => $old->{location}{latitude}, context => $old->{location}{context}, accuracy => $old->{location}{accuracy});
+			}
+			my @fields = qw(contact family friend public);
+			if (any {$old->{geoperms}{'is' . $::_} ne $new->{geoperms}{'is' . $::_}} @fields) {
+				flickr_photos_selected('geo.setPerms', $old, map {'is_' . $_ => $old->{geoperms}{'is' . $_}} @fields);
+			}
+		}
+
+		if (join(" ", sort keys $old->{tags}) ne join(" ", sort keys $new->{tags})) {
+			my $tagstring = join(" ", map {'"' . $_->{raw} . '"'} values $old->{tags});
+			flickr_photos_selected('setTags', $old, tags => $tagstring);
+		}
+		if (any {$old->{permission}{$::_} ne $new->{permissions}{$::_}} qw/permaddmeta permcomment/,
+			&& any {$old->{visibility}{$::_} ne $new->{visibility}{$::_}} qw/isfamily isfriend ispublic/,
+		) {
+			flickr_photos_selected(
+				'setPerms', $old,
+				map {'is_' . $_ => $old->{visibility}{'is' . $_}} qw/public friend family/,
+				map {'perm_' . $_ => $old->{permissions}{'perm' . $_}} qw/comment addmeta/,
+			);
+		}
+
+		my ($score_matrix, $allscores) = ({}, {});
+		my %weight = (id => 100, content => 3, x => 2, y => 2, w => 1, h => 1);
+		foreach my $n (values $old->{notes}) {
+			foreach my $m (values $new->{notes}) {
+				my $score = sum(map {$weight{$_}} grep {$n->{$_} eq $m->{$_}} qw/id x y h w _content/);
+				if ($score > 0) {
+					$score_matrix->{$n->{id}}{$m->{id}} = $score;
+					$allscores->{$score}++;
+				}
+			}
+		}
+		if (!$opts->{select} || "notes" =~ /$opts->{select}/) {
+			foreach my $score (sort {$b <=> $a} keys $allscores) {
+				foreach my $n (values $old->{notes}) {
+					my $m = first {$score_matrix->{$n->{id}}{$::_->{id}} == $score} values $new->{notes};
+					next unless $m;
+					delete $old->{notes}{$n->{id}};
+					delete $new->{notes}{$m->{id}};
+					next unless any {$n->{$::_} ne $m->{$::_}} qw/_content x y w h/;
+					flickr_photos('notes.edit', $old, note_id => $m->{id}, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
+				}
+			}
+			foreach my $n (values $old->{notes}) {
+				flickr_photos('notes.add', $old, note_text => $n->{_content}, map {'note_' . $_ => => $n->{$_}} qw/x y w h/);
+			}
+			foreach my $m (values $new->{notes}) {
+				flickr_api('photos.notes.delete', note_id => $m->{id});
+			}
+		}
+
+		if (!$opts->{select} || "people" =~ /$opts->{select}/) {
+			foreach my $p (values $old->{people}{list}) {
+				my $q = $new->{people}{list}{$p->{nsid}};
+				my %coords = map { 'person_' . $_ => $p->{$_} } qw/x y h w/;
+				if (!$q) {
+					flickr_photos('people.add', $old, 'user_id' => $p->{nsid}, %coords);
+				} elsif (all {!defined $p->{$::_}} qw/x y h w/ and any {defined $q->{$::_}} qw/x y h w/) {
+					flickr_photos('people.deleteCoords', $old, 'user_id' => $p->{nsid});
+				} elsif (any {$p->{$::_} ne $q->{$::_}} qw/x y h w/) {
+					flickr_photos('people.editCoords', $old, 'user_id' => $p->{nsid}, %coords);
+				}
+			}
+			if ($new->{people}{list}) {
+				foreach my $q (values $new->{people}{list}) {
+					unless ($old->{people}{list}{$q->{nsid}}) {
+						flickr_photos('people.delete', $old, 'user_id' => $q->{nsid});
+					}
+				}
+			}
+		}
+	}
+
+	my $photoset_backups = parallelize(
+		flickr_add_photoset_info(
+			with_progressbar(
+				flickr_filter_photosets( sub {
+					state $i = 0;
+					my $res = Load($photoset_backups_yaml->[$i++]);
+					return undef unless $res;
+					$res->{total} = +@$photoset_backups_yaml;
+					$res->{num} = $i;
+					return $res;
+				})
+			)
+		)
+	);
+
+	while (my $old = $photoset_backups->()) {
+		my $new = $old->{info};
+
+		my %update_photos;
+
+		my $oldorder = join(",", @{$old->{order}});
+		if ($oldorder ne join(",", @{$new->{order}}) && (!$opts->{select} || 'photo_ids' =~ /$opts->{select}/)) {
+			$update_photos{photo_ids} = $oldorder;
+		}
+		if ($old->{primary} ne $new->{primary} && (!$opts->{select} || 'primary_photo_id' =~ /$opts->{select}/)) {
+			$update_photos{primary_photo_id} = $old->{primary};
+		}
+		if ($update_photos{photo_ids}) {
+			flickr_photosets('editPhotos', $old, %update_photos);
+		} elsif (%update_photos) {
+			flickr_photosets('setPrimaryPhoto', $old, photo_id => $update_photos{primary_photo_id});
+		}
+
+		my %update_meta;
+		foreach my $k (qw/title description/) {
+			if ($old->{$k} ne $new->{$k} && (!$opts->{select} || $k =~ /$opts->{select}/)) {
+				$update_meta{$k} = $old->{$k};
+			}
+		}
+		if (%update_meta) {
+			flickr_photosets('editMeta', $old, %update_meta);
+		}
 	}
 }
 
