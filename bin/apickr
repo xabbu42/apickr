@@ -427,7 +427,6 @@ sub aperture_select {
 		return undef unless $sth;
 		my $row = $sth->fetchrow_hashref;
 		if (!$row) {
-			$dbh->disconnect;
 			$sth = undef;
 			return undef;
 		}
