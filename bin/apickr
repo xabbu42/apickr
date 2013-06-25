@@ -570,10 +570,10 @@ sub parallelize {
 				$channel->put($next) if $next;
 			} while ($next);
 			$active_coros--;
-			$channel->put(undef) unless $active_coros;
+			$channel->shutdown unless $active_coros;
 		}
 	}
-	return sub { return $active_coros ? $channel->get : undef; };
+	return sub { $channel->get };
 }
 
 sub one_element {
