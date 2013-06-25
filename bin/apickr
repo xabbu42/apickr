@@ -1091,7 +1091,7 @@ sub apickr_match {
 	my $ap;
 
 	return sub {
-		while ($ickr and %$ickr and ($ap = $ap_gen->())) {
+		while ($ap = $ap_gen->()) {
 			while ($ickr and %$ickr and $ickr->{datetaken} lt $ap->{imageDate}) {
 				$ickr = $ickr_gen->();
 			}
