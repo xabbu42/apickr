@@ -377,6 +377,11 @@ sub aperture_select {
 	$add = "" unless $add;
 	my $dbpath = catdir($path, 'Database', 'Library.apdb');
 	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
+	END {
+		if ($dbh) {
+			$dbh->rollback; $dbh->disconnect
+		};
+	}
 	{
 		local $dbh->{AutoCommit} = 1;
 		$dbh->do('ATTACH DATABASE ? AS p;', undef, catdir($path, 'Database', 'Properties.apdb'))
