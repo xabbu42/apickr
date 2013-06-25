@@ -109,7 +109,7 @@ if ($opts->{id}) {
 my $command = shift() || "albums";
 my $path;
 if ($command !~ /^flickr-/) {
-	$path = shift() || catdir($ENV{HOME}, 'Pictures', '2 Sterne.aplibrary');
+	$path = shift() || catdir($ENV{HOME}, 'Pictures', 'Portugal 2012.aplibrary');
 }
 
 my @global_wait_coros;
@@ -134,10 +134,7 @@ given ($command) {
 	}
 
 	when ("sync") {
-		my $ap_gen   = aperture_select_images();
-		my $ickr_gen = parallelize(with_progressbar(flickr_photos_list(), 'Photos'));
-		my $sync     = apickr_sync($ap_gen, $ickr_gen);
-		while ($sync->()) {};
+		apickr_sync();
 	}
 
 	when ("flickr-backup") {
@@ -266,7 +263,6 @@ sub flickr_photos {
 sub flickr_photos_selected {
 	state $semaphore = Coro::Semaphore->new(10);
 	my ($method, $photo, %args) = @_;
-	my $callback = delete $args{callback};
 	if ($opts->{select}) {
 		foreach my $key (keys %args) {
 			delete $args{$key} unless $key =~ /$opts->{select}/;
@@ -274,12 +270,15 @@ sub flickr_photos_selected {
 	}
 	if (%args) {
 		$semaphore->down();
-		push @global_wait_coros, async {
+		my $coro = async {
 			my $res = flickr_photos($method, $photo, %args);
-			$callback->($res) if $callback;
 			$semaphore->up();
-		}
+			$res;
+		};
+		push @global_wait_coros, $coro;
+		return $coro;
 	}
+	return undef;
 }
 
 sub flickr_photosets {
@@ -369,6 +368,11 @@ sub aperture_select_albums {
 }
 
 sub aperture_select {
+	state $calls;
+
+	if ($calls++) {
+		confess "aperture_select called more than once";
+	}
 	my ($select, $add) = @_;
 	$add = "" unless $add;
 	my $dbpath = catdir($path, 'Database', 'Library.apdb');
@@ -1087,38 +1091,42 @@ sub apickr_match {
 }
 
 sub apickr_sync {
-	my ($ap_gen, $ickr_gen) = @_;
+	my $ap_gen   = aperture_select_images();
+	my $ickr_gen = parallelize(with_progressbar(flickr_photos_list(), 'Photos'));
 	my $match    = apickr_match($ap_gen, $ickr_gen);
 
-	return sub {
+	my $sets;
+	my $gen = flickr_photosets_list();
+	while (my $set = $gen->()) {
+		$sets->{$set->{title}} = $set;
+	}
+
+	while (1) {
 		my $ap;
 		do {
 			$ap = $match->();
 		} while $ap && !$ap->{flickr} && !$opts->{upload};
-		return undef unless $ap;
+		last unless $ap;
 		my $ickr = $ap->{flickr};
 
-		my $settags = apickr_tags_from_ap($ap, $ickr);
+		my $settags  = apickr_tags_from_ap($ap, $ickr);
 		my $setperms = apickr_perms_from_ap($ap, $ickr);
 
-		if (!$ap->{flickr}) {
-			flickr_photos_selected(
+		if (!$ickr) {
+			# hardcoded default defaults from flickr, should check if user changed them...
+			delete $setperms->{perm_comment} if $setperms->{perm_comment} == 3;
+			delete $setperms->{perm_addmeta} if $setperms->{perm_addmeta} == 2;
+			my $coro = flickr_photos_selected(
 				'upload',
 				{},
 				title       => $ap->{name},
 				description => $ap->{caption},
 				tags        => $settags,
-				(map {$_ => $setperms->{$_}} qw/is_family is_friend is_public/),
+				(map {$_ => delete $setperms->{$_}} qw/is_family is_friend is_public/),
 				photo       => $ap->{path},
-				callback    => sub {
-					my $result = shift;
-					#recommended defaults of flickr, TODO use actual user set defaults
-					if ($setperms->{perm_comment} != 3 || $setperms->{perm_addmeta} != 2) {
-						flickr_photos_selected('setPerms', {id => $result->photoid}, %$setperms);
-					}
-				}
 			);
-
+			$settags = undef;
+			$ickr = {id => $coro->join()->{photoid}};
 		} else {
 			if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
 				flickr_photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
@@ -1127,14 +1135,29 @@ sub apickr_sync {
 			if ($settags) {
 				flickr_photos_selected('setTags', $ickr, tags => $settags);
 			}
-
-			if ($setperms) {
-				flickr_photos_selected('setPerms', $ickr, %$setperms);
-			}
 		}
 
-		return $ap;
+		if ($setperms) {
+			flickr_photos_selected('setPerms', $ickr, %$setperms);
+		}
+
+		my $gotalbum = 0;
+		foreach my $context ($ickr->{contexts}) {
+			if ($context->{name} eq $ap->{album}) {
+				$gotalbum = 1;
+			}
+		}
+		if (!$gotalbum) {
+			my $set = $sets->{$ap->{album}};
+			if (!$set) {
+				$set = flickr_photosets('create', {}, 'title' => $ap->{album}, 'primary_photo_id' => $ickr->{id});
+				$sets->{$ap->{album}} = $set;
+			} else {
+				flickr_photosets('addPhoto', $set, 'photo_id' => $ickr->{id});
+			}
+		}
 	}
+
 }
 
 sub display {
