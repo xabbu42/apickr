@@ -621,22 +621,18 @@ sub flickr_photos_list {
 		$gen = sub {
 			while(1) {
 				my $guard = $semaphore->guard();
-				return undef if $opts->{num} && $num >= $opts->{num};
 				return undef if !$set && !($set = $sets->());
 				if (!$photos) {
 					$photos = add_keys(
 						{photoset => $set},
 						flickr_select(
 							'photosets.getPhotos',
-							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @_, total => $opts->{num}}
+							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @_}
 						)
 					);
 				}
 				my $photo = $photos->();
-				if ($photo) {
-					$num++;
-					return $photo;
-				}
+				return $photo if $photo;
 				$set = undef; $photos = undef;
 			}
 		};
@@ -646,6 +642,7 @@ sub flickr_photos_list {
 			push @photos, $photo;
 		}
 		@photos = sort {$a->{datetaken} cmp $b->{datetaken}} @photos;
+		@photos = @photos[0..($opts->{num}-1)] if $opts->{num};
 		$gen = sub { return shift @photos };
 
 	} elsif (!$gen) {
