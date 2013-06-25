@@ -459,10 +459,12 @@ sub datetime_aperture {
 	state $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d %H:%M:%S');
 	state $macepoch  = DateTime::Format::Epoch->new(
 		epoch => DateTime->new(year => 2001, month => 1, day => 1),
-		);
+	);
+	state $timezone  = DateTime::TimeZone->new('name' => 'local');
 	my ($val) = @_;
 	my $res = $macepoch->parse_datetime(shift) or die "Could not parse aperture date '$val'\n";
 	$res->set_formatter($formatter);
+	$res->set_time_zone($timezone);
 	return $res;
 }
 
