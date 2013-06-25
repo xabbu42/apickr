@@ -1107,7 +1107,7 @@ sub apickr_match {
 
 sub apickr_sync {
 	my $ap_gen   = aperture_select_images();
-	my $ickr_gen = parallelize(with_progressbar(flickr_photos_list(), 'Photos'));
+	my $ickr_gen = parallelize(with_progressbar(flickr_add_contexts(flickr_photos_list()), 'Photos'));
 	my $match    = apickr_match($ap_gen, $ickr_gen);
 
 	my $sets;
@@ -1157,8 +1157,8 @@ sub apickr_sync {
 		}
 
 		my $gotalbum = 0;
-		foreach my $context ($ickr->{contexts}) {
-			if ($context->{name} eq $ap->{album}) {
+		foreach my $context (@{$ickr->{contexts}}) {
+			if ($context->{title} eq $ap->{album}) {
 				$gotalbum = 1;
 			}
 		}
