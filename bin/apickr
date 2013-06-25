@@ -616,6 +616,7 @@ sub flickr_photos_list {
 		my ($photos, $set, $num);
 		my $semaphore = Coro::Semaphore->new();
 		$sets = flickr_filter_photosets($sets);
+
 		$gen = sub {
 			while(1) {
 				my $guard = $semaphore->guard();
@@ -637,7 +638,15 @@ sub flickr_photos_list {
 				}
 				$set = undef; $photos = undef;
 			}
+		};
+
+		my @photos;
+		while (my $photo = $gen->()) {
+			push @photos, $photo;
 		}
+		@photos = sort {$a->{datetaken} cmp $b->{datetaken}} @photos;
+		$gen = sub { return shift @photos };
+
 	} elsif (!$gen) {
 		if ($opts->{title} && $opts->{title} =~ /^[\w\s_]+$/ && $opts->{word}) {
 			$gen = flickr_select(
