@@ -396,8 +396,9 @@ sub aperture_select {
 		. ($opts->{title} ? "AND RKVersion.name REGEXP ? " : '')
 		. ($opts->{ap_id} ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '');
 	my $count = ($add =~ /GROUP BY ([\w.]+)/) ? 'DISTINCT ' . $1 : '*';
-	my $csth = $dbh->prepare("SELECT COUNT($count) " . $sql);
-	my $sth = $dbh->prepare("SELECT $select " . $sql . $add . " ORDER BY RKVersion.imageDate " . ($opts->{num} ? " LIMIT ? " : ''));
+	my $limit = $opts->{num} ? " LIMIT ? " : '';
+	my $csth = $dbh->prepare("SELECT COUNT($count) " . $sql . $limit);
+	my $sth = $dbh->prepare("SELECT $select " . $sql . $add . " ORDER BY RKVersion.imageDate " . $limit);
 	my $param = 1;
 	if ($opts->{album}) {
 		$sth->bind_param($param, $opts->{album});
@@ -415,6 +416,7 @@ sub aperture_select {
 	}
 	if ($opts->{num}) {
 		$sth->bind_param($param, $opts->{num});
+		$csth->bind_param($param, $opts->{num});
 	}
 
 	$csth->execute();
