@@ -1017,7 +1017,8 @@ sub apickr_perms_from_ap {
 		$perm_addmeta = $num if $keywords{'flickr:addmeta=' . $perm};
 		$num++;
 	}
-	if ( (any {$keywords{'flickr:' . $::_} != $ickr->{'is' . $::_}} qw/family friend public/)
+
+	if ( (any {$keywords{'flickr:' . $::_} != $ickr->{info}{visibility}{'is' . $::_}} qw/family friend public/)
 		 || $perm_comment != $ickr->{info}{permissions}{permcomment}
 		 || $perm_addmeta != $ickr->{info}{permissions}{permaddmeta}
 		) {
@@ -1038,7 +1039,6 @@ sub apickr_tags_from_ap {
 	if (!$gottags) {
 		my $auth = flickr_auth();
 		my $tags = flickr_api('tags.getListUserRaw', user_id => $auth->{user}{nsid});
-		my (%rawtags, %cleantags);
 		foreach my $tag (@{$tags->{tags}}) {
 			$rawtags{$tag->{clean}} = $tag->{raw}[0];
 			$cleantags{$_} = $tag->{clean} foreach @{$tag->{raw}};
@@ -1104,7 +1104,7 @@ sub apickr_match {
 
 sub apickr_sync {
 	my $ap_gen   = aperture_select_images();
-	my $ickr_gen = flickr_add_contexts(with_progressbar(flickr_photos_list(), 'Photos'));
+	my $ickr_gen = flickr_add_contexts(flickr_add_photo_info(with_progressbar(flickr_photos_list(), 'Photos')));
 	my $match    = apickr_match($ap_gen, $ickr_gen);
 
 	my $sets;
