@@ -576,6 +576,24 @@ sub parallelize {
 	return sub { $channel->get };
 }
 
+sub fix_order {
+	my ($gen) = @_;
+	my @got;
+	my $last = -1;
+	return sub {
+		if (@got && $got[0]{num} == $last + 1) {
+			$last = $got[0]{num};
+			return shift @got;
+		}
+		do {
+			push @got, $gen->();
+		} while ($got[-1] && $got[-1]{num} != $last + 1);
+		sort {$a->{new} <=> $b->{new}} @got;
+		$last = $got[0]{num};
+		return shift @got;
+	}
+}
+
 sub one_element {
 	my ($el) = @_;
 	return sub {my $r = $el; $el = undef; return $r;};
@@ -1084,6 +1102,7 @@ sub apickr_tags_from_ap {
 sub apickr_match {
 	my ($ap_gen, $ickr_gen) = @_;
 
+	$ickr_gen = fix_order($ickr_gen);
 	my $ickr = $ickr_gen->();
 	my $ap;
 
