@@ -18,7 +18,8 @@ use Carp;
 
 sub select_images {
 	return aperture_select(
-		($main::opts->{select} ? 'RKVersion.uuid AS id,*,' : '')
+		'RKVersion.uuid AS id,'
+		. ($main::opts->{select} ? '*,' : '')
 		. "RKFolder.name AS album,RKVersion.name,imagePath,mainRating,versionNumber,RKVersion.imageDate,"
 		. "(SELECT GROUP_CONCAT(name) FROM RKKeyword JOIN RKKeywordForVersion on keywordId = RKKeyword.modelId WHERE versionId = RKVersion.modelId) AS keywords,"
 		. "(SELECT stringProperty FROM p.RKUniqueString JOIN p.RKIptcProperty ON p.RKUniqueString.modelId = p.RKIptcProperty.stringId WHERE p.RKIptcProperty.versionId = RKVersion.modelId AND p.RKIptcProperty.propertyKey = 'Caption/Abstract') as caption,"
@@ -103,7 +104,7 @@ sub aperture_select {
 		}
 		if ($row->{imagePath}) {
 			my ($d,$dir,$name) = splitpath($row->{imagePath});
-			my $prev = catdir($main::opts->{path}, 'Previews', $dir, $row->{uuid}, $row->{name} . ".jpg");
+			my $prev = catdir($main::opts->{path}, 'Previews', $dir, $row->{id}, $row->{name} . ".jpg");
 			$row->{path} = -e $prev ? $prev : catdir($main::opts->{path}, 'Masters', $row->{imagePath});
 		}
 		if ($row->{imageDate}) {
