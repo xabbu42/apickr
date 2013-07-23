@@ -526,51 +526,56 @@ sub api {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 	}
 
-	if ($method eq 'photos.upload') {
-		my $raw = $api->raw();
-		my $photo = delete $params->{photo};
-		$params = {
-			api_key        => $raw->{api_key},
-			%$params,
-		};
-		$params->{api_sig} = $raw->sign_args($raw->{api_secret}, $params);
-		$params->{photo}   = [$photo];
-		my $req = POST 'http://api.flickr.com/services/upload/', 'Content_Type' => 'form-data', 'Content' => $params;
-		my $response = $raw->do_request($req);
-		die("API call failed with HTTP status: " . $response->code . "\n")
-			unless $response->code == 200;
-		my $content = $response->decoded_content;
-		$content = $response->content() unless defined $content;
-		my $result = XMLin($content);
-
-		return $result if ($result->{stat} eq 'ok');
-
-		die sprintf("API call failed: \%s (\%s)\n", $result->{err}{msg}, $result->{err}{code});
-
-	} else {
-		while(1) {
-			eval {
-				$req = $api->execute_method('flickr.' . $method, {%$params});
-			};
-			if ($@ && (!$params->{page} || $params->{page} == 1)) {
-				if ($@ =~ /HTTP status: 504/) {
-					cluck $@;
-				} else {
-					confess $@;
-				}
+	while(1) {
+		eval {
+			if ($method eq 'photos.upload') {
+				$req = upload_photo($api, $params);
 			} else {
-				last;
+				$req = $api->execute_method('flickr.' . $method, {%$params});
 			}
 		};
-		if ($req && $req->{stat} eq 'ok') {
-			delete $req->{stat};
-			if (%$req) {
-				my ($first) = keys $req;
-				return simplify_response($req->{$first}, $params->{page} ? 0 : 1);
+		if ($@ && (!$params->{page} || $params->{page} == 1)) {
+			if ($@ =~ /HTTP status: (504|500)/) {
+				cluck $@;
+			} else {
+				confess $@;
 			}
+		} else {
+			last;
+		}
+	};
+
+	if ($req && $req->{stat} eq 'ok') {
+		delete $req->{stat};
+		if (%$req) {
+			my ($first) = keys $req;
+			return simplify_response($req->{$first}, $params->{page} ? 0 : 1);
 		}
 	}
 	return undef;
+}
+
+sub upload_photo {
+	my ($api,$params) = @_;
+	my $raw = $api->raw();
+	$params = {
+		api_key        => $raw->{api_key},
+		%$params,
+	};
+	my $photo = delete $params->{photo};
+	$params->{api_sig} = $raw->sign_args($raw->{api_secret}, $params);
+	$params->{photo}   = [$photo];
+	my $req = POST 'http://api.flickr.com/services/upload/', 'Content_Type' => 'form-data', 'Content' => $params;
+	my $response = $raw->do_request($req);
+	die("API call failed with HTTP status: " . $response->code . "\n")
+		unless $response->code == 200;
+	my $content = $response->decoded_content;
+	$content = $response->content() unless defined $content;
+	my $result = XMLin($content);
+
+	return $result if ($result->{stat} eq 'ok');
+
+	die sprintf("API call failed: \%s (\%s)\n", $result->{err}{msg}, $result->{err}{code});
 }
 
 sub photos {
