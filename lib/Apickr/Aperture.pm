@@ -31,7 +31,6 @@ sub select_albums {
 	return aperture_select(
 		($main::opts->{select} ? 'RKVersion.uuid AS id,*,' : '')
 		. "RKFolder.name AS album,"
-		. "COUNT(DISTINCT COALESCE(RKVersion.stackUuid,RKVersion.uuid)) AS stacks,"
 		. "COUNT(DISTINCT RKVersion.uuid) AS images",
 		"GROUP BY RKVersion.projectUuid",
 	);
@@ -61,10 +60,13 @@ sub aperture_select {
 		"FROM RKVersion"
 		. " JOIN RKFolder ON RKFolder.uuid = RKVersion.projectUuid"
 		. " JOIN RKMaster ON RKVersion.masterUuid = RKMaster.uuid"
+		. " LEFT JOIN RKStackContent ON RKVersion.uuid = RKStackContent.versionUuid "
 		. " WHERE RKVersion.isInTrash = 0 AND RKVersion.versionNumber > 0 AND RKFolder.folderType = 2 "
+		. " AND (RKVersion.stackUuid IS NULL OR RKStackContent.orderNumber = (SELECT MIN(orderNumber) FROM RKStackContent WHERE RKStackContent.stackUuid = RKVersion.stackUuid))"
 		. ($main::opts->{album} ? "AND RKFolder.name REGEXP ? " : '')
 		. ($main::opts->{title} ? "AND RKVersion.name REGEXP ? " : '')
-		. ($main::opts->{ap_id} ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '');
+		. ($main::opts->{ap_id} ? "AND (RKFolder.uuid = ? OR RKVersion.uuid = ?) " : '')
+		;
 	my $count = ($add =~ /GROUP BY ([\w.]+)/) ? 'DISTINCT ' . $1 : '*';
 	my $limit = $main::opts->{num} ? " LIMIT ? " : '';
 	my $csth = $dbh->prepare("SELECT COUNT($count) " . $sql . $limit);
