@@ -12,16 +12,26 @@ use Apickr::Flickr;
 use Apickr::Aperture;
 
 sub match {
+	my $explanation = <<'EOM';
+Apickr sorts images by date to match the same images from aperture and flickr.
+Mulitple images with the exact same date are not yet supported.
+EOM
 	my ($ap_gen, $ickr_gen) = @_;
 
 	$ickr_gen = fix_order($ickr_gen);
 	my $ickr = $ickr_gen->();
-	my $ap;
+	my ($ap, $last_ap_date);
 
 	return sub {
 		while ($ap = $ap_gen->()) {
+			die "\nGot multiple images from Aperture with same date.\n$explanation"
+				if $last_ap_date && $ap->{imageDate} eq $last_ap_date;
+			$last_ap_date = $ap->{imageDate};
 			while ($ickr and %$ickr and $ickr->{datetaken} lt $ap->{imageDate}) {
+				my $last = $ickr->{datetaken};
 				$ickr = $ickr_gen->();
+				die "\nGot multiple images from Flickr with same date.\n$explanation"
+					if ($ickr->{datetaken} eq $last);
 			}
 			if ($ickr and %$ickr and $ickr->{datetaken} eq $ap->{imageDate}) {
 				$ap->{flickr} = $ickr;
