@@ -24,34 +24,39 @@ Synchronize aperture library given by PATH with flickr.
 
 =head1 OPTIONS
 
- --help|-h         brief help message
- --num=NUM         only process NUM items
- --album|-a=REGEX  only process albums or photosets which match REGEX
- --title|-t=REGEX  only process images or photos which match REGEX
- --word|-w         only match --album or --title at word boundaries
- --id              only process photo/image or photoset/album with this id
- --filter|-f=REGEX only display/count results where any key or any value match REGEX
- --not|--invert    only display/count results where no key or value match --filter
- --count|-c        count number of results
- --classify=FIELD  count number of results per FIELD value
- --verbose|-v      output verbose information
- --select|-s       regex to select *additional* keys to display
-                   or the *only* keys to write for restore/sync.
- --dry-run|-n      only output changes to flickr data
- --force|-f        overwrite already existing backups with flickr-backup
- --exif            add exif data to images and photos
- --contexts        add contexts (photosets...) to flickr photos
- --info            add additional info to flickr photos
- --fix-date-upload also set the upload date to the date taken in flickr-fix
- --upload          upload missing photos to flickr during sync
+ General Options
+   --help|-h         brief help message
+
+ Options to select images/albums
+   --num=NUM         only process NUM items
+   --album|-a=REGEX  only process albums or photosets which match REGEX
+   --title|-t=REGEX  only process images or photos which match REGEX
+   --word|-w         only match --album or --title at word boundaries
+   --id              only process photo/image or photoset/album with this id
+   --filter|-f=REGEX only display/count results where any key or any value match REGEX
+   --not|--invert    only display/count results where no key or value match --filter
+
+ Options to change output for selected images/albums
+   --count|-c        count number of results
+   --classify=FIELD  count number of results per FIELD value
+   --verbose|-v      output verbose information
+   --select|-s       regex to select *additional* keys to display
+                     or the *only* keys to write for restore/sync.
+   --exif            add exif data to images and photos
+   --contexts        add contexts (photosets...) to flickr photos
+   --info            add additional info to flickr photos
+
+ Options to change behaviour of specific commands
+   --dry-run|-n      only output changes to flickr data
+   --force|-f        overwrite already existing backups with flickr-backup
+   --fix-date-upload also set the upload date to the date taken in flickr-fix
+   --upload          upload missing photos to flickr during sync
 
 =head1 AUTHOR
 
  Nathan Gass <gass@search.ch>
 
 =cut
-
-$0 = 'apickr';
 
 use Modern::Perl;
 use autodie;
@@ -90,6 +95,8 @@ GetOptions(
 ) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
 $config = {%$config, %$opts};
+
+$0 = 'apickr';
 
 if ($opts->{id}) {
 	my $id = delete $opts->{id};
