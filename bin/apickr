@@ -40,8 +40,10 @@ Synchronize aperture library given by PATH with flickr.
    --count|-c        count number of results
    --classify=FIELD  count number of results per FIELD value
    --verbose|-v      output verbose information
-   --select|-s       regex to select *additional* keys to display
+   --select|-s=REGEX regex to select *additional* keys to display
                      or the *only* keys to write for restore/sync.
+   --select-only|-o  only select additional keys to display without
+                     the default fields.
    --exif            add exif data to images and photos
    --contexts        add contexts (photosets...) to flickr photos
    --info            add additional info to flickr photos
@@ -90,7 +92,7 @@ our $opts = {};
 GetOptions(
 	$opts,
 	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v+',
-	'select|s=s', 'dry-run|n', 'force|f', 'exif', 'contexts', 'info', 'fix-date-upload', 'count|c',
+	'select|s=s', 'select-only|o', 'dry-run|n', 'force|f', 'exif', 'contexts', 'info', 'fix-date-upload', 'count|c',
 	'filter|f=s', 'classify=s', 'not|invert', 'upload',
 ) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};

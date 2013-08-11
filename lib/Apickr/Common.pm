@@ -21,7 +21,7 @@ sub display {
 
 	if ($main::opts->{verbose}) {
 		$regex = '.';
-	} elsif (!$main::opts->{count} || !$main::opts->{select}) {
+	} elsif (!$main::opts->{'select-only'} && (!$main::opts->{count} || !$main::opts->{select})) {
 		$regex .= '|^\.('
 			. '((flickr\.)?(title|photoset\.title|contexts\.title|info\.people\.list\.(.*)\.username|datetaken|tags|views|sets|exif))' #flickr photos keys
 			. '|photos|count_views|count_comments'                                 #flickr photoset keys
