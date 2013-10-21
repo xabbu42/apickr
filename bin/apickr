@@ -107,7 +107,7 @@ if ($opts->{id}) {
 
 my $command = shift() || "albums";
 if ($command !~ /^flickr-/) {
-	$opts->{path} = shift() || catdir($ENV{HOME}, 'Pictures', 'Portugal 2012.aplibrary');
+	$opts->{path} = shift() || catdir($ENV{HOME}, 'Pictures', '2013_3star.aplibrary');
 }
 
 given ($command) {
