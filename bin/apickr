@@ -126,7 +126,7 @@ given ($command) {
 	when ("match") {
 		my $ap_gen   = Apickr::Aperture::select_images();
 		my $ickr_gen = parallelize(Apickr::Flickr::photos_list());
-		display(Apickr::Flickr::add_photo_info(Apickr::Sync::match($ap_gen, $ickr_gen)));
+		display(Apickr::Sync::match($ap_gen, $ickr_gen));
 	}
 
 	when ("sync") {
