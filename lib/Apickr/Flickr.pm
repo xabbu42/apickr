@@ -78,6 +78,8 @@ sub photos_list {
 		$sets = photosets_list();
 	}
 
+	my $extras = join(',', 'date_taken,date_upload,tags,view', $main::opts->{extras});
+
 	if ($sets) {
 		my ($photos, $set, $num);
 		my $semaphore = Coro::Semaphore->new();
@@ -92,7 +94,7 @@ sub photos_list {
 						{photoset => $set},
 						flickr_select(
 							'photosets.getPhotos',
-							{photoset_id => $set->{id}, extras => 'date_taken,date_upload,tags,view', @_}
+							{photoset_id => $set->{id}, extras => $extras, @_}
 						)
 					);
 				}
@@ -116,13 +118,13 @@ sub photos_list {
 		if ($main::opts->{title} && $main::opts->{title} =~ /^[\w\s_]+$/ && $main::opts->{word}) {
 			$gen = flickr_select(
 				'photos.search',
-				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', text => $main::opts->{title}}
+				{user_id => 'me', sort => 'date-taken-asc', extras => $extras, text => $main::opts->{title}}
 			);
 		} else {
 			warn "Using complex --title or omitting --word causes slow scan of *all* the photos in the flickr account!\n" if $main::opts->{title};
 			$gen = flickr_select(
 				'people.getPhotos',
-				{user_id => 'me', sort => 'date-taken-asc', extras => 'date_taken,date_upload,tags,views', @_, total => $main::opts->{num}},
+				{user_id => 'me', sort => 'date-taken-asc', extras => $extras, @_, total => $main::opts->{num}},
 			);
 		}
 	}

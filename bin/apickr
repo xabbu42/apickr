@@ -44,6 +44,7 @@ Synchronize aperture library given by PATH with flickr.
                      or the *only* keys to write for restore/sync.
    --select-only|-o  only select additional keys to display without
                      the default fields.
+   --extras=S        added to flickr api calls where aplicable
    --exif            add exif data to images and photos
    --contexts        add contexts (photosets...) to flickr photos
    --info            add additional info to flickr photos
@@ -92,7 +93,7 @@ our $opts = {};
 GetOptions(
 	$opts,
 	'help|h', 'num=i', 'album|a=s', 'title|t=s', 'word|t', 'id=s', 'verbose|v+',
-	'select|s=s', 'select-only|o', 'dry-run|n', 'force|f', 'exif', 'contexts', 'info', 'fix-date-upload', 'count|c',
+	'select|s=s', 'select-only|o', 'dry-run|n', 'force|f', 'extras=s', 'exif', 'contexts', 'info', 'fix-date-upload', 'count|c',
 	'filter|f=s', 'classify=s', 'not|invert', 'upload',
 ) or pod2usage(-exitval => 2, @podargs);
 pod2usage(@podargs) if $opts->{help};
