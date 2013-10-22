@@ -557,6 +557,10 @@ sub api {
 		}
 	};
 
+	if ($main::opts->{verbose} > 2) {
+		print "\n", Dump($req), "\n";
+	}
+
 	if ($req && $req->{stat} eq 'ok') {
 		delete $req->{stat};
 		if (%$req) {
