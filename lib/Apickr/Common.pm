@@ -113,7 +113,7 @@ sub encode_rec {
 sub fix_order {
 	my ($gen) = @_;
 	my @got;
-	my $last = -1;
+	my $last = 0;
 	return sub {
 		if (@got && $got[0]{num} == $last + 1) {
 			$last = $got[0]{num};
@@ -122,7 +122,7 @@ sub fix_order {
 		do {
 			push @got, $gen->();
 		} while ($got[-1] && $got[-1]{num} != $last + 1);
-		sort {$a->{new} <=> $b->{new}} @got;
+		@got = sort {$a->{num} <=> $b->{num}} @got;
 		$last = $got[0]{num};
 		return shift @got;
 	}

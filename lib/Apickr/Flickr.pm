@@ -108,6 +108,8 @@ sub photos_list {
 		}
 		@photos = sort {$a->{datetaken} cmp $b->{datetaken}} @photos;
 		@photos = @photos[0..($main::opts->{num}-1)] if $main::opts->{num};
+		my $num = 1;
+		$_->{num} = $num++ foreach @photos;
 		$gen = sub { return shift @photos };
 
 	} elsif (!$gen) {
