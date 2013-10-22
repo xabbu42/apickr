@@ -151,12 +151,6 @@ given ($command) {
 
 	when ("flickr-photos") {
 		my $gen = Apickr::Flickr::photos_list();
-		if ($opts->{exif} || $opts->{contexts} || $opts->{info}) {
-			$gen = Apickr::Flickr::add_contexts($gen)   if $opts->{contexts};
-			$gen = Apickr::Flickr::add_photo_info($gen) if $opts->{info};
-			$gen = Apickr::Flickr::add_exif($gen)       if $opts->{exif};
-			$gen = parallelize($gen);
-		}
 		display($gen);
 	}
 

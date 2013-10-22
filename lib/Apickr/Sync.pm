@@ -45,7 +45,11 @@ EOM
 
 sub sync {
 	my $ap_gen   = Apickr::Aperture::select_images();
-	my $ickr_gen = parallelize(Apickr::Flickr::add_contexts(Apickr::Flickr::add_photo_info(with_progressbar(Apickr::Flickr::photos_list(), 'Photos'))));
+	my $ickr_gen;
+	{
+		local $main::opts = {%$main::opts, 'contexts' => 1, 'info' => 1};
+		$ickr_gen = parallelize(with_progressbar(Apickr::Flickr::photos_list(), 'Photos'));
+	}
 	my $match    = match($ap_gen, $ickr_gen);
 
 	my $sets;

@@ -125,7 +125,15 @@ sub photos_list {
 		}
 	}
 
-	return filter_photos($gen);
+	$gen = filter_photos($gen);
+	if ($main::opts->{exif} || $main::opts->{contexts} || $main::opts->{info}) {
+		$gen = Apickr::Flickr::add_contexts($gen)   if $main::opts->{contexts};
+		$gen = Apickr::Flickr::add_photo_info($gen) if $main::opts->{info};
+		$gen = Apickr::Flickr::add_exif($gen)       if $main::opts->{exif};
+		$gen = parallelize($gen);
+	}
+
+	return $gen;
 }
 
 sub regex_search {
