@@ -196,7 +196,7 @@ sub tags_from_ap {
 	}
 
 	if ($changed) {
-		return join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags));
+		return join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags, keys %rating_tags));
 	} else {
 		return undef;
 	}
