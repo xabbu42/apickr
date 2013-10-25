@@ -21,8 +21,10 @@ EOM
 	$ickr_gen = fix_order($ickr_gen);
 	my $ickr = $ickr_gen->();
 	my ($ap, $last_ap_date);
+	my $semaphore = Coro::Semaphore->new();
 
 	return sub {
+		my $guard = $semaphore->guard();
 		while ($ap = $ap_gen->()) {
 			die "\nGot multiple images from Aperture with same date.\n$explanation"
 				if $last_ap_date && $ap->{imageDate} eq $last_ap_date;
