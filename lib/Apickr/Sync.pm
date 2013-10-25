@@ -92,7 +92,7 @@ sub sync {
 					Apickr::Flickr::photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
 				}
 
-				if ($settags) {
+				if (defined $settags) {
 					Apickr::Flickr::photos_selected('setTags', $ickr, tags => $settags);
 				}
 			}
