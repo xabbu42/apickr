@@ -180,25 +180,24 @@ sub tags_from_ap {
 	}
 	$rating_tags{'aperture:rating=' . $ap->{mainRating}}++;
 
-	foreach my $tag (keys %keywords) {
-		if ($tag !~ /^flickr:/) {
-			my $clean = $cleantags{$tag} // $tag;
+	foreach my $keyword (keys %keywords, keys %rating_tags) {
+		if ($keyword !~ /^flickr:/) {
+			my $clean = $cleantags{$keyword} // $keyword;
 			$changed = $changed || !$tags{$clean};
 			$tags{$clean}++;
 		}
 	}
-	$tags{$_}++ foreach keys %rating_tags;
 
 	foreach my $tag (keys %tags) {
 		my $raw = $rawtags{$tag} // $tag;
-		if (!$keywords{$raw} && !$rating_tags{$tag}) {
+		if (!$keywords{$raw} && !$rating_tags{$raw}) {
 			$changed = 1;
 			delete $tags{$tag};
 		}
 	}
 
 	if ($changed) {
-		return join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags, keys %rating_tags));
+		return join(" ", map {'"' . ($rawtags{$_} // $_) . '"'} sort (keys %tags));
 	} else {
 		return undef;
 	}
