@@ -172,7 +172,7 @@ sub tags_from_ap {
 	my ($changed, $stars, %tags, %keywords, %rating_tags);
 
 	$keywords{$_}++ foreach split ",", $ap->{keywords};
-	$tags{$_}++     foreach split / /, $ickr->{tags};
+	$tags{$_}++     foreach split /[ ,]/, $ickr->{tags};
 
 	for ($stars = 1; $stars <= min(4, $ap->{mainRating}); $stars++) {
 		my $tag = 'aperture:rating=' . $stars . 'ormore';
