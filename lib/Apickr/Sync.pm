@@ -60,6 +60,8 @@ sub sync {
 		$sets->{$set->{title}} = $set;
 	}
 
+	my $uploadstart = time();
+
 	my $sync_all = sub {
 		while (1) {
 			my $ap;
@@ -87,6 +89,7 @@ sub sync {
 					);
 				$settags = undef;
 				$ickr = {id => $coro->join()};
+				Apickr::Flickr::photos_selected('setDates', $ickr, date_posted => $uploadstart + $ap->{num});
 			} else {
 				if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
 					Apickr::Flickr::photos_selected('setMeta', $ickr, title => $ap->{name}, description => $ap->{caption});
