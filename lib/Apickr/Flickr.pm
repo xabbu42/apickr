@@ -531,7 +531,7 @@ sub api {
 	$params->{auth_token} = $auth->{token}
 		if $auth;
 	my $req;
-	if (($main::opts->{verbose} || $main::opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit|upload|create)/) {
+	if (($main::opts->{verbose} || $main::opts->{'dry-run'}) && $method =~ /\.(set|remove|delete|add|edit|upload|create|reorder)/) {
 		print "\n", 'flickr.' . $method, "\n", Dump($params), "\n";
 		return undef if $main::opts->{'dry-run'};
 	} elsif  ($main::opts->{verbose} > 1) {
