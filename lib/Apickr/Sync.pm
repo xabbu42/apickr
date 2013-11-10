@@ -61,6 +61,7 @@ sub sync {
 	}
 
 	my $uploadstart = time();
+	my (%toorder, %didupdate);
 
 	my $sync_all = sub {
 		while (1) {
@@ -88,7 +89,7 @@ sub sync {
 					photo       => $ap->{path},
 					);
 				$settags = undef;
-				$ickr = {id => $coro->join()};
+				$ickr = $ap->{flickr} = {id => $coro->join()};
 				Apickr::Flickr::photos_selected('setDates', $ickr, date_posted => $uploadstart + $ap->{num});
 			} else {
 				if ($ap->{name} ne $ickr->{title} || $ap->{caption} ne $ickr->{description}) {
@@ -104,21 +105,23 @@ sub sync {
 				Apickr::Flickr::photos_selected('setPerms', $ickr, %$setperms);
 			}
 
-			my $gotalbum = 0;
+			my $set;
 			foreach my $context (@{$ickr->{contexts}}) {
 				if ($context->{title} eq $ap->{album}) {
-					$gotalbum = 1;
+					$set = $context;
 				}
 			}
-			if (!$gotalbum) {
-				my $set = $sets->{$ap->{album}};
+			if (!$set) {
+				$set = $sets->{$ap->{album}};
 				if (!$set) {
 					$set = Apickr::Flickr::photosets('create', {}, 'title' => $ap->{album}, 'primary_photo_id' => $ickr->{id});
 					$sets->{$ap->{album}} = $set;
 				} else {
 					Apickr::Flickr::photosets('addPhoto', $set, 'photo_id' => $ickr->{id});
 				}
+				$didupdate{$set->{id}}++;
 			}
+			$toorder{$set->{id}}{$ickr->{id}} = $ap->{num};
 
 			return $ap;
 		}
@@ -127,6 +130,14 @@ sub sync {
 	$sync_all = parallelize($sync_all);
 
 	while ($sync_all->()) {};
+
+	foreach my $setid (keys %didupdate) {
+		Apickr::Flickr::photosets(
+			'reorderPhotos',
+			{id => $setid},
+			'photo_ids' => join ",", (sort {$toorder{$setid}{$a} <=> $toorder{$setid}{$b}} keys %{$toorder{$setid}}),
+		);
+	}
 }
 
 sub perms_from_ap {
