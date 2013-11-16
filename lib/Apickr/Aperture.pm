@@ -36,6 +36,13 @@ sub select_albums {
 	);
 }
 
+our $dbh;
+END {
+	if ($dbh) {
+		$dbh->rollback; $dbh->disconnect
+	};
+}
+
 sub aperture_select {
 	state $calls;
 
@@ -45,12 +52,7 @@ sub aperture_select {
 	my ($select, $add) = @_;
 	$add = "" unless $add;
 	my $dbpath = catdir($main::opts->{path}, 'Database', 'Library.apdb');
-	my $dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
-	END {
-		if ($dbh) {
-			$dbh->rollback; $dbh->disconnect
-		};
-	}
+	$dbh = DBI->connect("dbi:SQLite:dbname=$dbpath","", "", { RaiseError => 1, AutoCommit => 0, ReadOnly => 1});
 	{
 		local $dbh->{AutoCommit} = 1;
 		$dbh->do('ATTACH DATABASE ? AS p;', undef, catdir($main::opts->{path}, 'Database', 'Properties.apdb'))
