@@ -5,7 +5,7 @@ use autodie;
 use common::sense;
 use List::AllUtils qw/first max min any all sum/;
 use YAML;
-
+use Coro;
 
 use Apickr::Common qw/fix_order with_progressbar parallelize/;
 use Apickr::Flickr;
@@ -114,9 +114,15 @@ sub sync {
 			if (!$set) {
 				$set = $sets->{$ap->{album}};
 				if (!$set) {
-					$set = Apickr::Flickr::photosets('create', {}, 'title' => $ap->{album}, 'primary_photo_id' => $ickr->{id});
-					$sets->{$ap->{album}} = $set;
+					my $coro = async {
+						Apickr::Flickr::photosets('create', {}, 'title' => $ap->{album}, 'primary_photo_id' => $ickr->{id});
+					};
+					$sets->{$ap->{album}} = $coro;
+					$sets->{$ap->{album}} = $set = $coro->join();
 				} else {
+					if(ref($set) eq 'Coro') {
+						$sets->{$ap->{album}} = $set = $set->join();
+					}
 					Apickr::Flickr::photosets('addPhoto', $set, 'photo_id' => $ickr->{id});
 				}
 				$didupdate{$set->{id}}++;
